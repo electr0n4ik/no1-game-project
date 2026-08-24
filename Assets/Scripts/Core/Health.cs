@@ -11,6 +11,8 @@ public class Health : MonoBehaviour
     public float Current { get; private set; }
     public bool IsDead => Current <= 0f;
     public float ArmorFlat { get; set; }
+    private float _lastHit = -9f;
+    private const float PlayerInvulnSec = 0.5f;
 
     public event Action<Health> Damaged;
     public event Action<Health> Died;
@@ -29,6 +31,8 @@ public class Health : MonoBehaviour
     public void TakeDamage(float amount)
     {
         if (IsDead || amount <= 0f) return;
+        if (isPlayer && Time.time - _lastHit < PlayerInvulnSec) return;
+        _lastHit = Time.time;
         float incoming = Mathf.Max(1f, amount - ArmorFlat);
         Current = Mathf.Max(0f, Current - incoming);
         Damaged?.Invoke(this);
