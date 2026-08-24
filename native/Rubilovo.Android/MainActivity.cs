@@ -10,7 +10,7 @@ using System.Linq;
 
 namespace Rubilovo.Android;
 
-[Application(HardwareAccelerated = true)]
+[Application(HardwareAccelerated = false)]
 public class App : Application
 {
     protected App(IntPtr handle, JniHandleOwnership ownership) : base(handle, ownership) { }
@@ -32,7 +32,7 @@ public class MainActivity : Activity
 
 public class GameView : SurfaceView, ISurfaceHolderCallback
 {
-    private enum Phase { Run, Dead, Victory }
+    private enum Phase { Menu, Run, Dead, Victory }
 
     private sealed class Mob
     {
@@ -64,12 +64,16 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
     private int _spawnNumber, _kills, _elites, _bossesKilled, _eliteDropIndex;
     private readonly bool[] _bossSpawned = new bool[4];
     private Mob? _bossAlive;
-    private Phase _phase = Phase.Run;
+    private Phase _phase = Phase.Menu;
+    private bool _survival;
+    private float _nextSurvBoss = 18f;
+    private static float _bestSurv;
     private long _endedAt;
 
     private bool _joyActive;
     private float _joyOx, _joyOy, _jdx, _jdy;
     private float _density = 2f;
+    private long _nullLocks, _posted;
 
     private const float ArenaHalf = 20f;
     private const float ArenaClamp = 19.2f;
@@ -84,8 +88,13 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         FocusableInTouchMode = true;
     }
 
-    public void SurfaceCreated(ISurfaceHolder holder) => ResumeLoop();
-    public void SurfaceChanged(ISurfaceHolder holder, Format format, int w, int h) { }
+    public void SurfaceCreated(ISurfaceHolder holder)
+    {
+        global::Android.Util.Log.Info("Game", "SurfaceCreated");
+        ResumeLoop();
+    }
+    public void SurfaceChanged(ISurfaceHolder holder, Format format, int w, int h)
+        => global::Android.Util.Log.Info("Game", $"SurfaceChanged {w}x{h}");
     public void SurfaceDestroyed(ISurfaceHolder holder) => PauseLoop();
 
     public void ResumeLoop()
@@ -107,15 +116,29 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
             long now = Java.Lang.JavaSystem.CurrentTimeMillis();
             float dt = Math.Min((now - last) / 1000f, 0.05f);
             last = now;
-            if (_phase == Phase.Run && Width > 0) Update(dt);
-
-            Canvas? c = null;
             try
             {
-                c = Holder.LockCanvas();
-                if (c != null) OnDraw(c);
+                if (_phase == Phase.Run && Width > 0) Update(dt);
+                Canvas? c = Holder.LockCanvas();
+                if (c == null)
+                {
+                    _nullLocks++;
+                    if (_nullLocks % 120 == 1)
+                        global::Android.Util.Log.Info("Game", $"LockCanvas null x{_nullLocks}");
+                    System.Threading.Thread.Sleep(16);
+                    continue;
+                }
+                OnDraw(c);
+                Holder.UnlockCanvasAndPost(c);
+                _posted++;
             }
-            finally { if (c != null) Holder.UnlockCanvasAndPost(c); }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Error("Game", ex.ToString());
+                _running = false;
+            }
+            if (_posted % 300 == 1)
+                global::Android.Util.Log.Info("Game", $"posted={_posted}");
             System.Threading.Thread.Sleep(8);
         }
     }
@@ -158,8 +181,12 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         return true;
     }
 
-    private void ResetRun()
+    private void ResetRun() => ResetRun(false);
+
+    private void ResetRun(bool survival)
     {
+        _survival = survival;
+        _nextSurvBoss = 18f;
         _px = _py = 0; _hp = GameBalance.Player_MaxHP;
         _level = 1; _levelUps = 0; _xp = 0;
         _mobs.Clear(); _shots.Clear(); _orbs.Clear(); _bladeTicks.Clear(); _touchCd.Clear();
@@ -212,7 +239,7 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
 
     private void Blades(float minutes)
     {
-        float dmg = 10f * (1f + _levelUps * 0.06f);
+        float dmg = 10f * (1f + _levelUps * 0.06f) * Kinematics.PowerFromLevels(_levelUps);
         for (int b = 0; b < BladesN; b++)
         {
             float a = (_bladeAngle + 360f / BladesN * b) * MathF.PI / 180f;
@@ -235,6 +262,18 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
 
     private void Director(float dt, float minutes)
     {
+        if (_survival)
+        {
+            if (!_bossSpawned[0] || _bossAlive is { Hp: > 0 } || minutes < _nextSurvBoss) return;
+            BossStats st = WaveScript.SurvivalBossAt(_nextSurvBoss);
+            var sb = new Mob { Kind = EnemyKind.Tank, Boss = true,
+                X = RingX(), Y = RingY(), Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
+            _mobs.Add(sb);
+            _bossAlive = sb;
+            _nextSurvBoss += GameBalance.Surv_BossRepeatEveryMin;
+            return;
+        }
+
         for (int i = 0; i < WaveScript.BossScheduleMinutes.Length; i++)
         {
             if (_bossSpawned[i] || minutes < WaveScript.BossScheduleMinutes[i]) continue;
@@ -261,12 +300,13 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         }
         if (bossFight) return;
 
-        int cap = WaveScript.AliveCap(minutes);
+        int cap = _survival ? WaveScript.SurvivalAliveCap(minutes) : WaveScript.AliveCap(minutes);
         int alive = _mobs.Count(m => m.Hp > 0);
         if (alive >= cap) return;
 
         _spawnNumber++;
-        int batch = Math.Min(WaveScript.BatchSize(minutes), cap - alive);
+        int batch = _survival ? WaveScript.SurvivalBatch(minutes) : WaveScript.BatchSize(minutes);
+        batch = Math.Min(batch, cap - alive);
         for (int i = 0; i < batch; i++)
             Spawn(WaveScript.RollKind(minutes, _rng.NextDouble()), minutes, false);
     }
@@ -357,6 +397,12 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
     {
         _hp = Math.Max(0f, _hp - Math.Max(1f, raw));
         if (_phase == Phase.Run) _lastHurt = _runTime;
+        if (_hp <= 0f && _phase == Phase.Run)
+        {
+            _phase = Phase.Dead;
+            _endedAt = Java.Lang.JavaSystem.CurrentTimeMillis();
+            if (_survival && _runTime > _bestSurv) _bestSurv = _runTime;
+        }
     }
 
     private void HurtMob(Mob m, float dmg)
@@ -468,13 +514,33 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         _p.Color = Color.Rgb(6, 214, 160);
         c.DrawRect(0, 0, Width * Math.Clamp(_hp / GameBalance.Player_MaxHP, 0f, 1f), 5 * _density, _p);
 
+        if (_phase == Phase.Menu)
+        {
+            _p.Color = Color.Argb(200, 20, 21, 38);
+            c.DrawRect(0, 0, Width, Height, _p);
+            _p.Color = Color.White;
+            _p.TextSize = 40 * _density;
+            string logo = "РУБИЛОВО";
+            c.DrawText(logo, cx - _p.MeasureText(logo) / 2, Height * 0.16f, _p);
+            _p.TextSize = 24 * _density;
+            string c1 = "КАМПАНИЯ 15:00";
+            c.DrawText(c1, cx - _p.MeasureText(c1) / 2, Height * 0.30f, _p);
+            string c2 = "ВЫЖИВАНИЕ ∞";
+            c.DrawText(c2, cx - _p.MeasureText(c2) / 2, Height * 0.62f, _p);
+            _p.Color = Color.Rgb(184, 189, 212);
+            _p.TextSize = 15 * _density;
+            string rec = _bestSurv > 0 ? $"рекорд выживания: {_bestSurv:0} сек" : "выбери режим";
+            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.72f, _p);
+            return;
+        }
+
         if (_phase != Phase.Run)
         {
             _p.Color = Color.Argb(175, 20, 21, 38);
             c.DrawRect(0, 0, Width, Height, _p);
             _p.Color = Color.White;
             _p.TextSize = 32 * _density;
-            string title = _phase == Phase.Victory ? "ПОБЕДА!" : "ПОРАЖЕНИЕ";
+            string title = (_phase == Phase.Victory ? "ПОБЕДА!" : "ПОРАЖЕНИЕ") + (_survival ? " · ∞" : "");
             c.DrawText(title, cx - _p.MeasureText(title) / 2, cy - 40 * _density, _p);
             _p.TextSize = 18 * _density;
             string sub = $"время {mm}:{ss:00}   убийства {_kills}   элиты {_elites}   боссы {_bossesKilled}   мясо +{meat}";

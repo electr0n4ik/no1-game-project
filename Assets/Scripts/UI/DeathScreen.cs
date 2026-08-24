@@ -38,7 +38,8 @@ public class DeathScreen : MonoBehaviour
 
         panel.SetActive(true);
         bool victory = GameManager.Instance.LastRunWasVictory;
-        titleLabel.text = victory ? "ПОБЕДА" : "ПОРАЖЕНИЕ";
+        string modeTag = GameManager.Instance.CurrentMode == GameMode.Survival ? " · ВЫЖИВАНИЕ" : "";
+        titleLabel.text = (victory ? "ПОБЕДА" : "ПОРАЖЕНИЕ") + modeTag;
 
         RunTracker tracker = RunTracker.Instance;
         float t = GameManager.Instance.RunTime;
@@ -51,7 +52,15 @@ public class DeathScreen : MonoBehaviour
                           $"Боссы: {(tracker != null ? tracker.BossesKilled : 0)}";
 
         SaveSystem.Data.bestLevel = Mathf.Max(SaveSystem.Data.bestLevel, levelReached);
-        SaveSystem.RecordBest(t, kills, levelReached);
+        if (GameManager.Instance.CurrentMode == GameMode.Survival)
+        {
+            SaveSystem.RecordSurvivalBest(t);
+            statsLabel.text += $"\nРекорд выживания: {SaveSystem.Data.bestSurvivalTimeSec:0} сек";
+        }
+        else
+        {
+            SaveSystem.RecordBest(t, kills, levelReached);
+        }
 
         pendingMeat = Economy.MeatForRunFinal(
             kills,

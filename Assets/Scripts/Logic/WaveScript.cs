@@ -92,20 +92,59 @@ namespace Rubilovo.Logic
                 GameBalance.Spawn_Start * (float)System.Math.Pow(GameBalance.Spawn_Decay, spawnNumber));
         }
 
+        public static float SurvivalSpawnInterval(float elapsedMinutes)
+        {
+            if (elapsedMinutes <= GameBalance.Surv_LateFromMin)
+                return SpawnInterval(int.MaxValue / 2);
+            float t = System.Math.Min(1f,
+                (elapsedMinutes - GameBalance.Surv_LateFromMin) /
+                (GameBalance.Surv_LateToMin - GameBalance.Surv_LateFromMin));
+            return GameBalance.Surv_SpawnFloorLate +
+                   (1f - t) * (GameBalance.Spawn_Floor - GameBalance.Surv_SpawnFloorLate);
+        }
+
         public static int BatchSize(float elapsedMinutes)
         {
             float m = elapsedMinutes;
             if (m < 3f) return 1;
             if (m < 7f) return 2;
-            if (m < 8f) return 3;
-            if (m < 11f) return 3;
             if (m < 12f) return 3;
             return 4;
+        }
+
+        public static int SurvivalBatch(float elapsedMinutes)
+        {
+            int baseBatch = BatchSize(elapsedMinutes);
+            if (elapsedMinutes <= GameBalance.Run_DurationMin) return baseBatch;
+            int extra = (int)((elapsedMinutes - GameBalance.Run_DurationMin) / GameBalance.Surv_BatchStepEveryMin);
+            return System.Math.Min(GameBalance.Surv_BatchMax, baseBatch + extra);
         }
 
         public static int AliveCap(float elapsedMinutes)
         {
             return elapsedMinutes < GameBalance.Cap_SwitchMin ? GameBalance.Alive_CapEarly : GameBalance.Alive_CapLate;
+        }
+
+        public static int SurvivalAliveCap(float elapsedMinutes)
+        {
+            if (elapsedMinutes >= GameBalance.Surv_CapSwitchMin) return GameBalance.Surv_AliveCapLate;
+            return AliveCap(elapsedMinutes);
+        }
+
+        public static (float MinSec, float MaxSec) EliteTimer(float elapsedMinutes)
+        {
+            return elapsedMinutes >= GameBalance.Surv_EliteFasterFromMin
+                ? (GameBalance.Surv_EliteTimerMinSec, GameBalance.Surv_EliteTimerMaxSec)
+                : (WaveConstants.Elite_TimerMinSec, WaveConstants.Elite_TimerMaxSec);
+        }
+
+        public static BossStats SurvivalBossAt(float minuteMark)
+        {
+            int slot = (int)(minuteMark / GameBalance.Surv_BossRepeatEveryMin) % 3;
+            BossStats b = Bosses[System.Math.Clamp(slot, 0, 2)];
+            b.Minute = (int)minuteMark;
+            b.Hp *= 1f + GameBalance.Surv_BossHpGrowthPerMin * System.Math.Max(0f, minuteMark - 4f);
+            return b;
         }
 
         public static List<EnemyKind> RollWaveComposition(float elapsedMinutes, int count, System.Random rng)
