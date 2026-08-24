@@ -19,9 +19,28 @@ public partial class GameView
         public int Pierce = -1;
         public bool Arc;
         public HashSet<Mob> Hit = new();
+        public string Sprite = "";
+        public float Rot, RotSpeed, Size = 0.45f;
     }
 
     private readonly List<PBullet> _pshots = new();
+
+    private sealed class Fx { public string Name = ""; public float X, Y, Life, Size, Angle; }
+    private readonly List<Fx> _fx = new();
+    private float _shakeAmp, _shakeUntil;
+    private long _freezeUntilMs;
+
+    private void Punch(float amp, float dur)
+    {
+        _shakeAmp = MathF.Max(_shakeAmp, amp);
+        _shakeUntil = _runTime + dur;
+    }
+
+    private void SpawnFx(string name, float x, float y, float size, float angle, float life)
+    {
+        if (_fx.Count > 24) _fx.RemoveAt(0);
+        _fx.Add(new Fx { Name = name, X = x, Y = y, Size = size, Angle = angle, Life = life });
+    }
 
     private sealed class DmgNum { public float X, Y; public string Txt = ""; public float Life; public bool Crit; }
     private readonly List<DmgNum> _nums = new();
@@ -42,6 +61,7 @@ public partial class GameView
         _wcd.Clear(); _auraHit.Clear();
         _pendingCards = 0; _cards.Clear();
         _whipBackAt = -1f; _comboShown = 0; _toastUntil = 0;
+        _fx.Clear(); _shakeAmp = 0;
         _evolved.Clear();
     }
 
@@ -421,6 +441,8 @@ public partial class GameView
         if (cards.Count == 0) return;
         ApplyCard(cards[0]);
         Play("chest", 0.8f);
+        AddQuestProg("chests", 1);
+        SpawnFx("chest_small", _px, _py - 1f, 0.7f, 0, 1.0f);
         Toast("СУНДУК: " + CardLabel(cards[0]));
     }
 
@@ -443,6 +465,8 @@ public partial class GameView
     private void OpenBigChest()
     {
         Play("chest", 0.9f);
+        SpawnFx("chest_big", _px, _py - 1f, 0.9f, 0, 1.2f);
+        AddQuestProg("chests", 1);
         if (TryEvolveWeapon()) return;
         List<UpgradeCard> cards = UpgradeDeck.OfferThree(_loadout, _rng, 0x3F);
         int take = Math.Min(2, cards.Count);
@@ -462,6 +486,27 @@ public partial class GameView
         if (c.Type == CardType.Passive) return PassiveRu[(int)c.Passive];
         string w = WeaponsCatalog.Names[(int)c.Weapon];
         return c.Type == CardType.NewWeapon ? w : w + " ур.+1";
+    }
+
+    private bool _rerollUsed;
+    private int _rerollsFree;
+    private float _shieldUntil = -1f;
+
+    private void RerollCards()
+    {
+        if (_rerollUsed || _cards.Count == 0) return;
+        int cost = 50;
+        if (_rerollsFree > 0) { _rerollsFree--; }
+        else
+        {
+            if (_save.Meat < cost) { Toast("не хватает 🍖 на реролл"); return; }
+            _save.Meat -= cost;
+            AddQuestProg("meat_spent", cost);
+        }
+        _rerollUsed = true;
+        SaveSave();
+        _cards.Clear();
+        _cards.AddRange(UpgradeDeck.OfferThree(_loadout, _rng, 0x3F));
     }
 
     internal static readonly string[] PassiveRu =

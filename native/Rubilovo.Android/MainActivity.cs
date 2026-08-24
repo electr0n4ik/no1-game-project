@@ -32,7 +32,7 @@ public class MainActivity : Activity
 
 public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
 {
-    private enum Phase { Menu, Run, LevelUp, Tree, Paused, Dead, Victory }
+    private enum Phase { Menu, Run, LevelUp, Tree, Settings, Paused, Dead, Victory }
 
     private sealed class Mob
     {
@@ -80,6 +80,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
     private bool _joyActive;
     private float _joyOx, _joyOy, _jdx, _jdy;
     private float _density = 2f;
+    private bool _resetArm;
     private float _spawnCd = 0.8f;
     private float _grace;
     private float _hb;
@@ -172,6 +173,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
 
     private void Play(string name, float vol = 0.7f)
     {
+        if (!_save.SndOn) return;
         if (_sp == null || !_snd.TryGetValue(name, out int id)) return;
         _sp.Play(id, 1f, vol, 1, 0, 1f);
     }
@@ -191,7 +193,8 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             last = now;
             try
             {
-                if (_phase == Phase.Run && Width > 0) Update(dt);
+                if (Java.Lang.JavaSystem.CurrentTimeMillis() >= _freezeUntilMs &&
+                    _phase == Phase.Run && Width > 0) Update(dt);
                 Surface? sf = _surface;
                 if (sf == null) { System.Threading.Thread.Sleep(16); continue; }
                 Canvas? c = sf.LockHardwareCanvas();
@@ -219,6 +222,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             case MotionEventActions.Down:
                 if (_phase == Phase.LevelUp)
                 {
+                    if (InBtn(e, 15)) { RerollCards(); break; }
                     for (int i = 0; i < _cards.Count && i < 3; i++)
                         if (_cardRects[i] != null && InRect(e, _cardRects[i]!)) { ChooseCard(i); break; }
                     break;
@@ -228,8 +232,20 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
                     HandleTreeTap(e);
                     break;
                 }
+                if (_phase == Phase.Settings)
+                {
+                    if (InBtn(e, 10)) { _save.SndOn = !_save.SndOn; SaveSave(); }
+                    else if (InBtn(e, 11)) { _save.VibOn = !_save.VibOn; SaveSave(); }
+                    else if (InBtn(e, 12))
+                    {
+                        if (_resetArm) { _save = new MetaSave(); SaveSave(); _resetArm = false; Toast("прогресс сброшен"); }
+                        else { _resetArm = true; Toast("нажмите ещё раз для сброса"); }
+                    }
+                    break;
+                }
                 if (_phase == Phase.Menu)
                 {
+                    if (InBtn(e, 9)) { _resetArm = false; _phase = Phase.Settings; break; }
                     if (InBtn(e, 7)) { _phase = Phase.Tree; break; }
                     if (InBtn(e, 0)) ResetRun(false);
                     else if (InBtn(e, 1)) ResetRun(true);
@@ -258,6 +274,15 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
                 }
                 if (Java.Lang.JavaSystem.CurrentTimeMillis() - _endedAt > 600)
                 {
+                    if (_phase == Phase.Dead && !_reviveMeatUsed && _save.Meat >= 250 && InBtn(e, 14))
+                    {
+                        _reviveMeatUsed = true;
+                        _save.Meat -= 250;
+                        AddQuestProg("meat_spent", 250);
+                        SaveSave();
+                        ReviveNow();
+                        break;
+                    }
                     if (InBtn(e, 2)) ResetRun(_survival);
                     else if (InBtn(e, 3)) _phase = Phase.Menu;
                 }
@@ -354,7 +379,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             Orb o = _orbs[i];
             float dx = _px - o.X, dy = _py - o.Y, d = MathF.Sqrt(dx * dx + dy * dy);
             if (d < MagnetR) { o.X += dx / MathF.Max(d, .01f) * 10f * dt; o.Y += dy / MathF.Max(d, .01f) * 10f * dt; }
-            if (d < 0.35f * ScaleNow + 0.25f) { AddXp(o.Value); _orbs.RemoveAt(i); }
+            if (d < 0.35f * ScaleNow + 0.25f) { AddXp(o.Value); AddQuestProg("orbs", 1); _orbs.RemoveAt(i); }
         }
     }
 
@@ -394,6 +419,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
                 X = SpawnPos().X, Y = SpawnPos().Y, Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
             _mobs.Add(sb);
             _bossAlive = sb;
+            Toast("БОСС: " + sb.Sprite.ToUpper());
             _nextSurvBoss += GameBalance.Surv_BossRepeatEveryMin;
             return;
         }
@@ -407,6 +433,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
                 X = SpawnPos().X, Y = SpawnPos().Y, Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
             _mobs.Add(b);
             _bossAlive = b;
+            Toast("БОСС: " + b.Sprite.ToUpper());
         }
 
         bool bossFight = _bossAlive is { Hp: > 0 };
@@ -623,6 +650,16 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
         if (_runTime - _lastHurt < 0.5f) return;
         _hp = Math.Max(0f, _hp - MathF.Max(1f, raw - ArmorFlat));
         _lastHurt = _runTime;
+        Punch(0.25f, 0.18f);
+        if (_save.VibOn)
+        {
+            try
+            {
+                var vib = (Vibrator?)(Context!.GetSystemService(Context.VibratorService));
+                vib?.Vibrate(25);
+            }
+            catch { }
+        }
         if (_hp <= 0f)
         {
             _phase = Phase.Dead;
@@ -651,6 +688,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             if (ReferenceEquals(_bossAlive, m)) _bossAlive = null;
             m.Hp = 0;
             DeathBurst(m);
+            Punch(0.5f, 0.3f);
             if (m.FinalBoss) { _phase = Phase.Victory; _endedAt = Java.Lang.JavaSystem.CurrentTimeMillis(); AwardRunEnd(); }
             return;
         }
@@ -729,6 +767,11 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
         c.DrawRGB(35, 37, 56);
         float ppu = Height / (OrthoNow * 2f);
         float cx = Width / 2f, cy = Height / 2f;
+        if (_runTime < _shakeUntil && _shakeAmp > 0f)
+        {
+            cx += (Random.Shared.NextSingle() * 2f - 1f) * _shakeAmp * ppu;
+            cy += (Random.Shared.NextSingle() * 2f - 1f) * _shakeAmp * ppu;
+        }
         float X(float wx) => cx + (wx - _px) * ppu;
         float Y(float wy) => cy + (wy - _py) * ppu;
 
@@ -741,6 +784,19 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
 
         foreach (Orb o in _orbs)
             Sprite(c, o.Value > 5 ? "orb5" : "orb", o.X, o.Y, o.Value > 5 ? 0.45f : 0.3f, 0);
+
+        _p.SetStyle(Paint.Style.Fill);
+        foreach (Shot es in _shots)
+            Sprite(c, "eshot", es.X, es.Y, 0.22f, 0);
+
+        foreach (PBullet b in _pshots)
+        {
+            if (b.Sprite == "") continue;
+            float bang = b.RotSpeed > 0 ? b.Rot : MathF.Atan2(b.Vy, b.Vx) * 180f / MathF.PI + 90f;
+            Sprite(c, b.Sprite, b.X, b.Y, b.Size, bang);
+        }
+        foreach (Fx f in _fx)
+            Sprite(c, f.Name, f.X, f.Y, f.Size, f.Angle, Math.Clamp((int)(f.Life / 0.15f * 255), 0, 255));
 
         foreach (Mob m in _mobs)
         {
@@ -763,6 +819,23 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
                 _p.StrokeWidth = 3;
                 _p.Color = Color.Rgb(239, 71, 111);
                 c.DrawCircle(X(m.X), Y(m.Y), 0.55f * m.Size * ppu + 5, _p);
+            }
+
+            if (m.Elite)
+            {
+                _p.SetStyle(Paint.Style.Fill);
+                _p.Color = Color.Rgb(255, 209, 102);
+                for (int t = -1; t <= 1; t++)
+                {
+                    float tx = X(m.X) + t * 10 * _density;
+                    float ty = Y(m.Y) - 0.62f * m.Size * ppu;
+                    using var tri = new global::Android.Graphics.Path();
+                    tri.MoveTo(tx - 5, ty + 8);
+                    tri.LineTo(tx + 5, ty + 8);
+                    tri.LineTo(tx, ty - 4);
+                    tri.Close();
+                    c.DrawPath(tri, _p);
+                }
             }
 
             if (m.Boss && m.BossState == 1)
@@ -860,11 +933,12 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             DrawBtn(c, 0, "КАМПАНИЯ · 15 МИН");
             DrawBtn(c, 1, "ВЫЖИВАНИЕ · ∞");
             DrawBtn(c, 7, $"ДЕРЕВО СТАТОВ · 🍖 {_save.Meat}");
+            DrawBtn(c, 9, "НАСТРОЙКИ");
             _p.SetStyle(Paint.Style.Fill);
             _p.TextSize = 14 * _density;
             _p.Color = Color.Rgb(184, 189, 212);
             string rec = _bestSurv > 0 ? $"рекорд выживания: {_bestSurv:0} сек" : "карточки апгрейдов — каждые 20-30 секунд";
-            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.70f, _p);
+            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.95f, _p);
             return;
         }
 
@@ -894,6 +968,8 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             c.DrawText(sub, cx - _p.MeasureText(sub) / 2, cy - 34 * _density, _p);
             string sub2 = $"элиты {_elites}   боссы {_bossesKilled}   мясо +{meat}";
             c.DrawText(sub2, cx - _p.MeasureText(sub2) / 2, cy - 10 * _density, _p);
+            if (_phase == Phase.Dead && !_reviveMeatUsed && _save.Meat >= 250)
+                DrawBtn(c, 14, "ВОЗРОДИТЬСЯ · 250 🍖");
             DrawBtn(c, 2, "ЗАНОВО");
             DrawBtn(c, 3, "В МЕНЮ");
         }
@@ -908,7 +984,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             float sz = 46 * _density;
             return new RectF(Width - sz - 16 * _density, 30 * _density, Width - 16 * _density, 30 * _density + sz);
         }
-        float cyF = slot switch { 0 => 0.34f, 1 => 0.47f, 2 => 0.60f, 3 => 0.725f, 4 => 0.42f, 5 => 0.565f, 7 => 0.60f, 8 => 0.885f, _ => 0.5f };
+        float cyF = slot switch { 0 => 0.34f, 1 => 0.47f, 2 => 0.60f, 3 => 0.725f, 4 => 0.42f, 5 => 0.565f, 7 => 0.60f, 8 => 0.885f, 9 => 0.735f, 10 => 0.30f, 11 => 0.44f, 12 => 0.58f, _ => 0.5f };
         float cy = cyF * Height;
         return new RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
     }

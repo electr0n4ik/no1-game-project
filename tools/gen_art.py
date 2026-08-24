@@ -39,6 +39,9 @@ def rrect(d, box, fill, ol=None, w=2, r=4):
 def poly(d, pts, fill, ol=None, w=2):
     d.polygon(pts, fill=fill, outline=ol or darken(fill), width=w)
 
+def hl(d, cx, cy, rx, ry, col, a=70):
+    d.ellipse([cx - rx, cy - ry, cx + rx * 0.2, cy - ry * 0.1], fill=col + (a,))
+
 def eyes(d, cx, cy, dx, r, col=(20, 20, 30, 255)):
     for sx in (-1, 1):
         d.ellipse([cx + sx * dx - r, cy - r, cx + sx * dx + r, cy + r], fill=col)
@@ -53,7 +56,9 @@ def gen_player():
     d.rectangle([26, 22, 38, 25], fill=darken(body, .3))  # визор
     ell(d, 17, 38, 5, 5, body, ol)                        # руки
     ell(d, 47, 38, 5, 5, body, ol)
-    rrect(d, [24, 34, 40, 39], PAL["leather"], w=1)       # ремень
+    rrect(d, [24, 34, 40, 39], PAL["leather"], w=1)
+    d.rectangle([30, 35, 34, 38], fill=PAL["gold"])
+    hl(d, 32, 30, 9, 7, (255, 255, 255))
     return im
 
 def gen_walker():
@@ -66,6 +71,9 @@ def gen_walker():
     eyes(d, 32, 21, 4, 2)
     ell(d, 22, 16, 3, 7, lighten(b, .05), ol)              # руки вперёд
     ell(d, 42, 16, 3, 7, lighten(b, .05), ol)
+    for yy in (34, 39, 44):
+        d.line([26, yy, 38, yy], fill=darken(b, .55), width=2)
+    hl(d, 30, 34, 10, 7, (255, 255, 255), 40)
     return im
 
 def gen_runner():
@@ -77,6 +85,8 @@ def gen_runner():
     poly(d, [(24, 14), (28, 4), (31, 13)], b, ol, w=1)     # уши
     poly(d, [(40, 14), (36, 4), (33, 13)], b, ol, w=1)
     eyes(d, 32, 19, 4, 2)
+    for i, yy in enumerate((34, 42, 50)):
+        d.line([14, yy, 24 - i * 2, yy], fill=lighten(b, .3), width=2)
     return im
 
 def gen_tank():
@@ -87,8 +97,11 @@ def gen_tank():
     rrect(d, [42, 24, 58, 44], plate, darken(plate), r=6)
     poly(d, [(10, 24), (14, 14), (18, 24)], lighten(plate, .1), w=1)  # шипы
     poly(d, [(46, 24), (50, 14), (54, 24)], lighten(plate, .1), w=1)
-    ell(d, 32, 22, 12, 11, lighten(b, .12), ol)            # голова
+    for rx, ry in ((12, 28), (16, 40), (48, 28), (52, 40)):
+        d.ellipse([rx - 2, ry - 2, rx + 2, ry + 2], fill=darken(plate, .6))
+    ell(d, 32, 22, 12, 11, lighten(b, .12), ol)
     eyes(d, 32, 21, 5, 2)
+    hl(d, 28, 32, 14, 9, (255, 255, 255), 45)
     return im
 
 def gen_shooter():
@@ -99,7 +112,8 @@ def gen_shooter():
     eyes(d, 32, 22, 4, 2, (10, 10, 20, 255))
     d.arc([38, 8, 60, 40], start=-70, end=70, fill=PAL["leather"], width=3)   # лук
     d.line([49, 10, 49, 38], fill=(230, 230, 235, 255), width=1)              # тетива
-    ell(d, 18, 34, 4, 4, bone, darken(bone))               # рука
+    ell(d, 18, 34, 4, 4, bone, darken(bone))
+    d.pieslice([20, 12, 44, 34], start=140, end=320, fill=darken(b, .55))
     return im
 
 def gen_sprinter():
@@ -119,7 +133,10 @@ def gen_kamikaze():
     ell(d, 32, 38, 16, 16, b, ol)
     ell(d, 26, 32, 5, 4, lighten(b, .35), None)            # блик
     d.line([32, 22, 32, 12], fill=PAL["leather"], width=3) # запал
-    d.ellipse([29, 6, 35, 12], fill=PAL["gold"])           # искра
+    d.ellipse([29, 6, 35, 12], fill=PAL["gold"])
+    ell(d, 32, 36, 8, 7, (255, 255, 255, 230))
+    eyes(d, 32, 35, 4, 2)
+    d.rectangle([29, 41, 35, 43], fill=(20, 20, 30, 200))
     return im
 
 def boss_base(col, r=26):
@@ -135,6 +152,8 @@ def gen_butcher():
     eyes(d, 32, 23, 4, 2, PAL["gold"] + (255,))
     d.line([8, 30, 56, 30], fill=PAL["wood"], width=4)      # топорище
     poly(d, [(48, 20), (60, 26), (48, 34)], PAL["steel"], darken(PAL["steel"]), w=2)
+    poly(d, [(48, 22), (57, 26), (48, 31)], lighten(PAL["steel"], .3), w=1)
+    hl(d, 28, 34, 14, 9, (255, 255, 255), 40)
     return im
 
 def gen_foundry():
@@ -143,7 +162,8 @@ def gen_foundry():
     d.ellipse([44, 2, 56, 14], fill=PAL["gold"], outline=darken(PAL["gold"]), width=2)
     ell(d, 32, 22, 12, 11, lighten(PAL["foundry"], .15))
     eyes(d, 32, 22, 4, 2, (240, 255, 255, 255))
-    d.arc([12, 26, 52, 54], start=180, end=360, fill=darken(PAL["foundry"], .6), width=3)  # мантия
+    d.arc([12, 26, 52, 54], start=180, end=360, fill=darken(PAL["foundry"], .6), width=3)
+    d.ellipse([28, 0, 36, 8], fill=(255, 255, 200, 255))
     return im
 
 def gen_executioner():
@@ -155,6 +175,7 @@ def gen_executioner():
                fill=PAL["steel"], width=4)
     ell(d, 32, 22, 12, 11, darken(PAL["executioner"], .6))
     eyes(d, 32, 22, 4, 2, PAL["gold"] + (255,))
+    hl(d, 30, 34, 13, 8, (255, 255, 255), 35)
     return im
 
 def gen_overlord():
@@ -162,7 +183,9 @@ def gen_overlord():
     poly(d, [(20, 16), (10, 2), (26, 12)], PAL["bone"], w=1)   # рога
     poly(d, [(44, 16), (54, 2), (38, 12)], PAL["bone"], w=1)
     eyes(d, 32, 22, 5, 2, PAL["gold"] + (255,))
-    rrect(d, [22, 44, 42, 50], PAL["gold"], w=1)               # ворот-золото
+    rrect(d, [22, 44, 42, 50], PAL["gold"], w=1)
+    for sx in (-1, 1):
+        poly(d, [(32 + sx * 14, 40), (32 + sx * 18, 34), (32 + sx * 10, 36)], PAL["gold"], w=1)
     return im
 
 # ---------- items & world ----------
@@ -216,6 +239,19 @@ def gen_skull():
     d.line([24, 28, 24, 32], fill=(15, 15, 25, 200), width=2)
     return im
 
+def gen_eshot():
+    im = canvas(16); d = ImageDraw.Draw(im)
+    ell(d, 8, 8, 5, 5, hx("#c77dff"))
+    ell(d, 8, 8, 2, 2, (255, 255, 255, 230))
+    return im
+
+def gen_chest(col, w=26, h=20):
+    im = Image.new("RGBA", (32, 32), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    rrect(d, [3, 10, 29, 28], col, darken(col), r=3)
+    rrect(d, [3, 6, 29, 13], lighten(col, .12), darken(col), r=3)
+    d.rectangle([14, 12, 18, 20], fill=PAL["gold"], outline=darken(PAL["gold"]))
+    return im
+
 def gen_icon():
     im = Image.new("RGBA", (512, 512), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
     for rr, col in ((250, hx("#1a1b2e")), (236, hx("#2b2d42"))):
@@ -234,6 +270,49 @@ def gen_icon():
 
 # ---------- run ----------
 
+def gen_dagger():
+    im = Image.new("RGBA", (12, 28), (0, 0, 0, 0)); d = ImageDraw.Draw(im)
+    poly(d, [(6, 1), (9, 7), (9, 18), (3, 18), (3, 7)], PAL["steel"], darken(PAL["steel"]), w=1)
+    d.rectangle([2, 18, 10, 20], fill=PAL["wood"], outline=darken(PAL["wood"]))
+    d.rectangle([5, 20, 7, 26], fill=PAL["leather"])
+    return im
+
+def gen_axep():
+    im = canvas(32); d = ImageDraw.Draw(im)
+    d.line([16, 4, 16, 28], fill=PAL["wood"], width=3)
+    poly(d, [(16, 4), (28, 8), (26, 16), (16, 14)], PAL["steel"], darken(PAL["steel"]), w=1)
+    poly(d, [(16, 4), (4, 8), (6, 16), (16, 14)], PAL["steel"], darken(PAL["steel"]), w=1)
+    return im
+
+def gen_bolt():
+    im = canvas(24); d = ImageDraw.Draw(im)
+    poly(d, [(14, 1), (6, 12), (11, 12), (8, 23), (18, 10), (12, 10)],
+         (255, 255, 180, 255), (255, 209, 102, 255), w=1)
+    return im
+
+def gen_whip():
+    im = canvas(48); d = ImageDraw.Draw(im)
+    d.arc([6, 6, 42, 42], start=-60, end=60, fill=(255, 245, 235, 220), width=5)
+    d.arc([6, 6, 42, 42], start=-60, end=60, fill=(255, 209, 102, 120), width=9)
+    return im
+
+def gen_tile2():
+    rnd = random.Random(99)
+    im = gen_tile(); d = ImageDraw.Draw(im)
+    for _ in range(3):
+        x, y = rnd.randint(10, 100), rnd.randint(10, 100)
+        d.line([x, y, x + rnd.randint(-20, 20), y + rnd.randint(-20, 20)],
+               fill=hx("#1d1f2e") + (255,), width=2)
+    return im
+
+def gen_bush():
+    im = canvas(48); d = ImageDraw.Draw(im)
+    for cx, cy, r in ((18, 30, 9), (28, 26, 10), (34, 32, 8)):
+        ell(d, cx, cy, r, r, hx("#2d4a2d"))
+    ell(d, 24, 22, 3, 3, hx("#ef476f"))
+    ell(d, 33, 28, 3, 3, hx("#ef476f"))
+    return im
+
 SPRITES = {
     "player": gen_player(), "walker": gen_walker(), "runner": gen_runner(),
     "tank": gen_tank(), "shooter": gen_shooter(), "sprinter": gen_sprinter(),
@@ -242,6 +321,8 @@ SPRITES = {
     "sword": gen_sword(), "orb": gen_orb(PAL["gold"]),
     "orb5": gen_orb(PAL["heal"], 40), "tile": gen_tile(7),
     "decor_rock": gen_rock(), "decor_grass": gen_grass(), "decor_skull": gen_skull(),
+    "dagger": gen_dagger(), "axe_p": gen_axep(), "bolt": gen_bolt(), "whip": gen_whip(),
+    "tile2": gen_tile2(), "decor_bush": gen_bush(),
 }
 
 for name, im in SPRITES.items():
