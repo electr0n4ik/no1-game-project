@@ -37,3 +37,6 @@ crashlytics-build.properties
 
 # dotnet test project must be tracked
 !tests/**/*.csproj
+
+# local apk artifacts
+dist/

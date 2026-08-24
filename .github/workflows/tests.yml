@@ -18,3 +18,6 @@ jobs:
 
       - name: Run spec-formula tests
         run: dotnet run --project tests/Logic.Tests
+
+      - name: Syntax check Unity scripts (V2 stub build)
+        run: dotnet build tests/SyntaxCheck/SyntaxCheck.csproj -maxcpucount:6
