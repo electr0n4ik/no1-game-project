@@ -194,6 +194,39 @@ public static class Program
                 if (c.Type != CardType.Passive) allPassiveOrFallback = false;
         Check.True("weapon slots full -> only passives", allPassiveOrFallback);
 
+        Console.WriteLine("== QuestGen + Streak (спека 02 s6-7) ==");
+        var q1 = QuestGen.Generate(20260824, 0, 0xFF);
+        Check.Eq("3 quests generated", 3, q1.Length);
+        var q2 = QuestGen.Generate(20260824, 0, 0xFF);
+        bool sameDay = true;
+        for (int i = 0; i < 3; i++) sameDay &= q1[i].Key == q2[i].Key;
+        Check.True("same seed -> same quests", sameDay);
+        var keys = new HashSet<string>();
+        foreach (var q in q1) keys.Add(q.Key);
+        Check.Eq("3 distinct templates", 3, keys.Count);
+        var qT2 = QuestGen.Generate(20260824, 1, 0xFF);
+        bool tier2 = false;
+        foreach (var q in qT2) if (q.Key == "kills") tier2 = q.Target == 800;
+        Check.True("tier scaling targets", tier2);
+        var qMask = QuestGen.Generate(5, 0, 0xFF & ~(1 << 0) & ~(1 << 1));
+        bool noMasked = true;
+        foreach (var q in qMask) if (q.Key == "kills" || q.Key == "minutes") noMasked = false;
+        Check.True("mask excludes templates", noMasked);
+        Check.Eq("tier by install day 2d", 0, QuestGen.TierByInstallDay(2));
+        Check.Eq("tier by install day 5d", 1, QuestGen.TierByInstallDay(5));
+        Check.Eq("tier by install day 12d", 2, QuestGen.TierByInstallDay(12));
+
+        Check.Eq("streak day1 = 50", 50, Streak.RewardFor(1));
+        Check.Eq("streak day6 = 130", 130, Streak.RewardFor(6));
+        Check.Eq("streak day7 = epic(-1)", -1, Streak.RewardFor(7));
+        Check.Eq("advance 1->2", 2, Streak.Advance(1));
+        Check.Eq("advance 7->1 (loop)", 1, Streak.Advance(7));
+        Check.Eq("epic roll low", 700, Streak.EpicRoll(10));
+        Check.Eq("epic roll mid", 800, Streak.EpicRoll(60));
+        Check.Eq("epic roll high", 900, Streak.EpicRoll(95));
+        Check.Eq("days between same", 0, Streak.DaysBetween(20260824, 20260824));
+        Check.Eq("days between +3", 3, Streak.DaysBetween(20260821, 20260824));
+
         Console.WriteLine(Check.Failed == 0
             ? "\nALL TESTS PASSED"
             : $"\n{Check.Failed} TEST(S) FAILED");
