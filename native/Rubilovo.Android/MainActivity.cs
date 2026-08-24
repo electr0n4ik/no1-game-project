@@ -32,7 +32,7 @@ public class MainActivity : Activity
 
 public class GameView : SurfaceView, ISurfaceHolderCallback
 {
-    private enum Phase { Menu, Run, Dead, Victory }
+    private enum Phase { Menu, Run, Paused, Dead, Victory }
 
     private sealed class Mob
     {
@@ -73,6 +73,9 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
     private bool _joyActive;
     private float _joyOx, _joyOy, _jdx, _jdy;
     private float _density = 2f;
+    private float _spawnCd = 0.8f;
+    private float _grace;
+    private float _hb;
     private long _nullLocks, _posted;
 
     private const float ArenaHalf = 20f;
@@ -149,15 +152,37 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         switch (e.Action)
         {
             case MotionEventActions.Down:
-                if (_phase != Phase.Run && Java.Lang.JavaSystem.CurrentTimeMillis() - _endedAt > 800)
+                if (_phase == Phase.Menu)
                 {
-                    ResetRun();
+                    if (InBtn(e, 0)) ResetRun(false);
+                    else if (InBtn(e, 1)) ResetRun(true);
                     break;
                 }
-                if (e.GetY() < Height * 0.7f)
+                if (_phase == Phase.Paused)
                 {
-                    _joyActive = true;
-                    _joyOx = e.GetX(); _joyOy = e.GetY(); _jdx = _jdy = 0;
+                    if (InBtn(e, 4)) _phase = Phase.Run;
+                    else if (InBtn(e, 5)) _phase = Phase.Menu;
+                    break;
+                }
+                if (_phase == Phase.Run)
+                {
+                    if (InBtn(e, 6))
+                    {
+                        _phase = Phase.Paused;
+                        _joyActive = false; _jdx = _jdy = 0;
+                        break;
+                    }
+                    if (e.GetY() < Height * 0.7f)
+                    {
+                        _joyActive = true;
+                        _joyOx = e.GetX(); _joyOy = e.GetY(); _jdx = _jdy = 0;
+                    }
+                    break;
+                }
+                if (Java.Lang.JavaSystem.CurrentTimeMillis() - _endedAt > 600)
+                {
+                    if (InBtn(e, 2)) ResetRun(_survival);
+                    else if (InBtn(e, 3)) _phase = Phase.Menu;
                 }
                 break;
 
@@ -194,6 +219,7 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         Array.Clear(_bossSpawned);
         _bossAlive = null;
         _runTime = 0; _bladeAngle = 0;
+        _spawnCd = 0.8f; _grace = 3f; _hb = 0;
         _phase = Phase.Run;
     }
 
@@ -228,6 +254,13 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
             if (hit) Hurt(s.Damage);
             if (s.Life <= 0 || hit) _shots.RemoveAt(i);
         }
+        _hb += dt;
+        if (_hb >= 10)
+        {
+            _hb = 0;
+            global::Android.Util.Log.Info("Game",
+                $"HB t={_runTime:0} hp={_hp:0} lvl={_level} kills={_kills} mobs={_mobs.Count(m => m.Hp > 0)} grace={_grace:0.0}");
+        }
         for (int i = _orbs.Count - 1; i >= 0; i--)
         {
             Orb o = _orbs[i];
@@ -255,6 +288,8 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
                 if (_runTime < t.NextAt) continue;
                 t.NextAt = _runTime + WeaponsCatalog.Blades_RehitSec;
                 HurtMob(m, dmg);
+                float kx = m.X - _px, ky = m.Y - _py, kl = MathF.Max(MathF.Sqrt(kx * kx + ky * ky), 1e-3f);
+                m.X += kx / kl * 0.12f; m.Y += ky / kl * 0.12f;
             }
         }
         _bladeTicks.RemoveAll(t => t.Mob.Hp <= 0 || !_mobs.Contains(t.Mob));
@@ -267,7 +302,7 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
             if (!_bossSpawned[0] || _bossAlive is { Hp: > 0 } || minutes < _nextSurvBoss) return;
             BossStats st = WaveScript.SurvivalBossAt(_nextSurvBoss);
             var sb = new Mob { Kind = EnemyKind.Tank, Boss = true,
-                X = RingX(), Y = RingY(), Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
+                X = SpawnPos().X, Y = SpawnPos().Y, Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
             _mobs.Add(sb);
             _bossAlive = sb;
             _nextSurvBoss += GameBalance.Surv_BossRepeatEveryMin;
@@ -280,7 +315,7 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
             _bossSpawned[i] = true;
             BossStats st = WaveScript.BossByIndex(i);
             var b = new Mob { Kind = EnemyKind.Tank, Boss = true, FinalBoss = i == 3,
-                X = RingX(), Y = RingY(), Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
+                X = SpawnPos().X, Y = SpawnPos().Y, Hp = st.Hp, Speed = st.Speed, Damage = st.ContactDamage, Size = 2.2f };
             _mobs.Add(b);
             _bossAlive = b;
         }
@@ -298,7 +333,13 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
                                                 WaveScript.WaveConstants.Elite_TimerMinSec);
             }
         }
-        if (bossFight) return;
+        if (bossFight || _grace > 0) return;
+
+        _spawnCd -= dt;
+        if (_spawnCd > 0) return;
+        _spawnCd = _survival
+            ? WaveScript.SurvivalSpawnInterval(minutes)
+            : WaveScript.SpawnInterval(_spawnNumber);
 
         int cap = _survival ? WaveScript.SurvivalAliveCap(minutes) : WaveScript.AliveCap(minutes);
         int alive = _mobs.Count(m => m.Hp > 0);
@@ -317,7 +358,7 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         _mobs.Add(new Mob
         {
             Kind = kind,
-            X = RingX(), Y = RingY(),
+            X = SpawnPos().X, Y = SpawnPos().Y,
             Hp = WaveScript.ScaledHp(minutes, kind) * (elite ? WaveScript.WaveConstants.Elite_HpMult : 1),
             Speed = b.Speed * (elite ? WaveScript.WaveConstants.Elite_SpeedMult : 1),
             Damage = WaveScript.ScaledDamage(minutes, kind) * (elite ? WaveScript.WaveConstants.Elite_DamageMult : 1),
@@ -338,18 +379,21 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         Spawn((EnemyKind)_rng.Next(6), minutes, true);
     }
 
-    private float RingX()
+    private (float X, float Y) SpawnPos()
     {
         float halfW = OrthoNow * Aspect + GameBalance.Spawn_RingExtra;
-        double a = _rng.NextDouble() * Math.PI * 2;
-        return Math.Clamp(_px + MathF.Cos((float)a) * halfW, -ArenaClamp, ArenaClamp);
-    }
-
-    private float RingY()
-    {
         float halfH = OrthoNow + GameBalance.Spawn_RingExtra;
-        double a = _rng.NextDouble() * Math.PI * 2;
-        return Math.Clamp(_py + MathF.Sin((float)a) * halfH, -ArenaClamp, ArenaClamp);
+        float r = MathF.Max(halfW, halfH);
+        for (int i = 0; i < 8; i++)
+        {
+            double a = _rng.NextDouble() * Math.PI * 2;
+            float x = Math.Clamp(_px + MathF.Cos((float)a) * r, -ArenaClamp, ArenaClamp);
+            float y = Math.Clamp(_py + MathF.Sin((float)a) * r, -ArenaClamp, ArenaClamp);
+            float dx = x - _px, dy = y - _py;
+            if (dx * dx + dy * dy >= GameBalance.Spawn_RerollMinDist * GameBalance.Spawn_RerollMinDist || i == 7)
+                return (x, y);
+        }
+        return (_px + r, _py);
     }
 
     private float Aspect => Width / (float)Math.Max(1, Height);
@@ -395,13 +439,16 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
 
     private void Hurt(float raw)
     {
+        if (_phase != Phase.Run) return;
+        if (_runTime - _lastHurt < 0.5f) return;
         _hp = Math.Max(0f, _hp - Math.Max(1f, raw));
-        if (_phase == Phase.Run) _lastHurt = _runTime;
-        if (_hp <= 0f && _phase == Phase.Run)
+        _lastHurt = _runTime;
+        if (_hp <= 0f)
         {
             _phase = Phase.Dead;
             _endedAt = Java.Lang.JavaSystem.CurrentTimeMillis();
             if (_survival && _runTime > _bestSurv) _bestSurv = _runTime;
+            global::Android.Util.Log.Info("Game", $"DEAD t={_runTime:0}s mode={(_survival ? "surv" : "camp")} kills={_kills}");
         }
     }
 
@@ -514,41 +561,118 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         _p.Color = Color.Rgb(6, 214, 160);
         c.DrawRect(0, 0, Width * Math.Clamp(_hp / GameBalance.Player_MaxHP, 0f, 1f), 5 * _density, _p);
 
+        if (_phase == Phase.Run)
+        {
+            var pb = Btn(6);
+            _p.SetStyle(Paint.Style.Fill);
+            _p.Color = Color.Argb(140, 43, 45, 66);
+            c.DrawRoundRect(pb, 10 * _density, 10 * _density, _p);
+            _p.SetStyle(Paint.Style.Fill);
+            _p.Color = Color.White;
+            float mx = (pb.Left + pb.Right) / 2f, my = (pb.Top + pb.Bottom) / 2f;
+            c.DrawRect(mx - 7 * _density, my - 12 * _density, mx - 2 * _density, my + 12 * _density, _p);
+            c.DrawRect(mx + 2 * _density, my - 12 * _density, mx + 7 * _density, my + 12 * _density, _p);
+
+            if (_grace > 0)
+            {
+                _p.Color = Color.White;
+                _p.TextSize = 90 * _density;
+                string cd = MathF.Ceiling(_grace).ToString("0");
+                c.DrawText(cd, cx - _p.MeasureText(cd) / 2, cy, _p);
+                _p.TextSize = 18 * _density;
+                _p.Color = Color.Rgb(184, 189, 212);
+                string g = "тяни пальцем — движение, клинки рубят сами";
+                c.DrawText(g, cx - _p.MeasureText(g) / 2, cy + 44 * _density, _p);
+            }
+        }
+
         if (_phase == Phase.Menu)
+        {
+            _p.Color = Color.Argb(215, 20, 21, 38);
+            c.DrawRect(0, 0, Width, Height, _p);
+            _p.Color = Color.White;
+            _p.TextSize = 44 * _density;
+            string logo = "РУБИЛОВО";
+            c.DrawText(logo, cx - _p.MeasureText(logo) / 2, Height * 0.17f, _p);
+            _p.TextSize = 15 * _density;
+            _p.Color = Color.Rgb(184, 189, 212);
+            string tag = "растёй · крути · руби · выживи";
+            c.DrawText(tag, cx - _p.MeasureText(tag) / 2, Height * 0.21f, _p);
+            DrawBtn(c, 0, "КАМПАНИЯ · 15 МИН");
+            DrawBtn(c, 1, "ВЫЖИВАНИЕ · ∞");
+            _p.SetStyle(Paint.Style.Fill);
+            _p.TextSize = 14 * _density;
+            _p.Color = Color.Rgb(184, 189, 212);
+            string rec = _bestSurv > 0 ? $"рекорд выживания: {_bestSurv:0} сек" : "две кнопки выше — два режима";
+            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.62f, _p);
+            return;
+        }
+
+        if (_phase == Phase.Paused)
+        {
+            _p.Color = Color.Argb(190, 20, 21, 38);
+            c.DrawRect(0, 0, Width, Height, _p);
+            _p.Color = Color.White;
+            _p.TextSize = 34 * _density;
+            string pt = "ПАУЗА";
+            c.DrawText(pt, cx - _p.MeasureText(pt) / 2, Height * 0.30f, _p);
+            DrawBtn(c, 4, "ПРОДОЛЖИТЬ");
+            DrawBtn(c, 5, "В МЕНЮ");
+            return;
+        }
+
+        if (_phase is Phase.Dead or Phase.Victory)
         {
             _p.Color = Color.Argb(200, 20, 21, 38);
             c.DrawRect(0, 0, Width, Height, _p);
             _p.Color = Color.White;
-            _p.TextSize = 40 * _density;
-            string logo = "РУБИЛОВО";
-            c.DrawText(logo, cx - _p.MeasureText(logo) / 2, Height * 0.16f, _p);
-            _p.TextSize = 24 * _density;
-            string c1 = "КАМПАНИЯ 15:00";
-            c.DrawText(c1, cx - _p.MeasureText(c1) / 2, Height * 0.30f, _p);
-            string c2 = "ВЫЖИВАНИЕ ∞";
-            c.DrawText(c2, cx - _p.MeasureText(c2) / 2, Height * 0.62f, _p);
-            _p.Color = Color.Rgb(184, 189, 212);
-            _p.TextSize = 15 * _density;
-            string rec = _bestSurv > 0 ? $"рекорд выживания: {_bestSurv:0} сек" : "выбери режим";
-            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.72f, _p);
-            return;
-        }
-
-        if (_phase != Phase.Run)
-        {
-            _p.Color = Color.Argb(175, 20, 21, 38);
-            c.DrawRect(0, 0, Width, Height, _p);
-            _p.Color = Color.White;
-            _p.TextSize = 32 * _density;
+            _p.TextSize = 34 * _density;
             string title = (_phase == Phase.Victory ? "ПОБЕДА!" : "ПОРАЖЕНИЕ") + (_survival ? " · ∞" : "");
-            c.DrawText(title, cx - _p.MeasureText(title) / 2, cy - 40 * _density, _p);
-            _p.TextSize = 18 * _density;
-            string sub = $"время {mm}:{ss:00}   убийства {_kills}   элиты {_elites}   боссы {_bossesKilled}   мясо +{meat}";
-            c.DrawText(sub, cx - _p.MeasureText(sub) / 2, cy, _p);
-            _p.Color = Color.Rgb(184, 189, 212);
-            string hint = "коснитесь экрана — новый забег";
-            c.DrawText(hint, cx - _p.MeasureText(hint) / 2, cy + 36 * _density, _p);
+            c.DrawText(title, cx - _p.MeasureText(title) / 2, cy - 70 * _density, _p);
+            _p.TextSize = 17 * _density;
+            string sub = $"время {mm}:{ss:00}   уровень {_level}   убийства {_kills}";
+            c.DrawText(sub, cx - _p.MeasureText(sub) / 2, cy - 34 * _density, _p);
+            string sub2 = $"элиты {_elites}   боссы {_bossesKilled}   мясо +{meat}";
+            c.DrawText(sub2, cx - _p.MeasureText(sub2) / 2, cy - 10 * _density, _p);
+            DrawBtn(c, 2, "ЗАНОВО");
+            DrawBtn(c, 3, "В МЕНЮ");
         }
+    }
+
+    private RectF Btn(int slot)
+    {
+        float w = Width * 0.52f, h = MathF.Max(52 * _density, Height * 0.05f);
+        float cx = Width / 2f;
+        if (slot == 6)
+        {
+            float sz = 46 * _density;
+            return new RectF(Width - sz - 16 * _density, 30 * _density, Width - 16 * _density, 30 * _density + sz);
+        }
+        float cyF = slot switch { 0 => 0.34f, 1 => 0.47f, 2 => 0.60f, 3 => 0.725f, 4 => 0.42f, 5 => 0.565f, _ => 0.5f };
+        float cy = cyF * Height;
+        return new RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
+    }
+
+    private bool InBtn(MotionEvent e, int slot)
+    {
+        RectF r = Btn(slot);
+        return e.GetX() >= r.Left && e.GetX() <= r.Right && e.GetY() >= r.Top && e.GetY() <= r.Bottom;
+    }
+
+    private void DrawBtn(Canvas c, int slot, string label)
+    {
+        RectF r = Btn(slot);
+        _p.SetStyle(Paint.Style.Fill);
+        _p.Color = Color.Argb(220, 43, 45, 66);
+        c.DrawRoundRect(r, 16 * _density, 16 * _density, _p);
+        _p.SetStyle(Paint.Style.Stroke);
+        _p.StrokeWidth = 2;
+        _p.Color = Color.Rgb(255, 209, 102);
+        c.DrawRoundRect(r, 16 * _density, 16 * _density, _p);
+        _p.SetStyle(Paint.Style.Fill);
+        _p.Color = Color.White;
+        _p.TextSize = 18 * _density;
+        c.DrawText(label, r.CenterX() - _p.MeasureText(label) / 2, r.CenterY() + 6 * _density, _p);
     }
 
     private static Color MobColor(Mob m)
