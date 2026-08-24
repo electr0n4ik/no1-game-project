@@ -298,6 +298,7 @@ namespace UnityEngine.UI
         {
             public void AddListener(Action call) { }
             public void RemoveListener(Action call) { }
+            public void RemoveAllListeners() { }
         }
     }
 

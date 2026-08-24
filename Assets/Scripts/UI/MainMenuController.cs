@@ -5,18 +5,21 @@ public class MainMenuController : MonoBehaviour
 {
     [SerializeField] private GameObject panel;
     [SerializeField] private Button startButton;
+    [SerializeField] private Button survivalButton;
 
     private void OnEnable()
     {
         GameManager.Instance.OnStateChanged += HandleState;
-        startButton.onClick.AddListener(StartClicked);
+        startButton.onClick.AddListener(() => StartClicked(GameMode.Campaign));
+        survivalButton.onClick.AddListener(() => StartClicked(GameMode.Survival));
     }
 
     private void OnDisable()
     {
         if (GameManager.Instance == null) return;
         GameManager.Instance.OnStateChanged -= HandleState;
-        startButton.onClick.RemoveListener(StartClicked);
+        startButton.onClick.RemoveAllListeners();
+        survivalButton.onClick.RemoveAllListeners();
     }
 
     private void HandleState(GameState state)
@@ -24,8 +27,5 @@ public class MainMenuController : MonoBehaviour
         panel.SetActive(state == GameState.Menu);
     }
 
-    private void StartClicked()
-    {
-        GameManager.Instance.StartRun();
-    }
+    private void StartClicked(GameMode mode) => GameManager.Instance.StartRun(mode);
 }
