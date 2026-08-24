@@ -30,9 +30,9 @@ public class MainActivity : Activity
     }
 }
 
-public class GameView : TextureView, TextureView.ISurfaceTextureListener
+public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
 {
-    private enum Phase { Menu, Run, Paused, Dead, Victory }
+    private enum Phase { Menu, Run, LevelUp, Tree, Paused, Dead, Victory }
 
     private sealed class Mob
     {
@@ -41,6 +41,7 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
         public EnemyKind Kind;
         public float X, Y, Hp, Speed, Damage, Size = 1f;
         public bool Elite, Boss, FinalBoss, Rewardless;
+        public float MaxHp, HitAt = -9f, SlowUntil;
     }
 
     private sealed class Shot { public float X, Y, Vx, Vy, Life, Damage; }
@@ -181,8 +182,20 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
         switch (e.Action)
         {
             case MotionEventActions.Down:
+                if (_phase == Phase.LevelUp)
+                {
+                    for (int i = 0; i < _cards.Count && i < 3; i++)
+                        if (_cardRects[i] != null && InRect(e, _cardRects[i]!)) { ChooseCard(i); break; }
+                    break;
+                }
+                if (_phase == Phase.Tree)
+                {
+                    HandleTreeTap(e);
+                    break;
+                }
                 if (_phase == Phase.Menu)
                 {
+                    if (InBtn(e, 7)) { _phase = Phase.Tree; break; }
                     if (InBtn(e, 0)) ResetRun(false);
                     else if (InBtn(e, 1)) ResetRun(true);
                     break;
@@ -249,13 +262,15 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
         _bossAlive = null;
         _runTime = 0; _bladeAngle = 0;
         _spawnCd = 0.8f; _grace = 3f; _hb = 0;
+        SimReset();
+        InitRunLoadout();
         _phase = Phase.Run;
     }
 
     private float ScaleNow => Kinematics.ScaleAfterLevelUps(_levelUps);
-    private int BladesN => 2 + _levelUps / 3;
-    private float BladeR => 1.1f * ScaleNow;
-    private float MagnetR => Kinematics.MagnetRadius(ScaleNow, 0, 0);
+    private int BladesN => _bladesOn ? _bladesN : 0;
+    private float BladeR => _bladeR;
+    private float MagnetR => _magnetR;
     private float OrthoNow => Kinematics.OrthoTarget(ScaleNow);
 
     private void Update(float dt)
@@ -264,15 +279,22 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
         float minutes = _runTime / 60f;
 
         float mag = MathF.Min(MathF.Sqrt(_jdx * _jdx + _jdy * _jdy), 1f);
-        float speed = Kinematics.FinalSpeed(mag, ScaleNow, 0, 0);
+        float speed = Kinematics.FinalSpeed(mag, ScaleNow, PassLvl(PassiveId.Speed), MetaSteps(4));
         float jm2 = MathF.Sqrt(_jdx * _jdx + _jdy * _jdy);
-        if (jm2 > 0.05f) _face = MathF.Atan2(_jdy, _jdx) * 180f / MathF.PI + 90f;
+        if (jm2 > 0.05f)
+        {
+            _face = MathF.Atan2(_jdy, _jdx) * 180f / MathF.PI + 90f;
+            _dirX = _jdx / jm2; _dirY = _jdy / jm2;
+        }
         float l = MathF.Max(jm2, 1e-5f);
         _px = Math.Clamp(_px + _jdx / l * speed * dt, -ArenaClamp, ArenaClamp);
         _py = Math.Clamp(_py + _jdy / l * speed * dt, -ArenaClamp, ArenaClamp);
 
-        _bladeAngle = (_bladeAngle + 260f * dt) % 360f;
+        WeaponsTick(dt);
         Blades(minutes);
+        RegenTick(dt);
+        JuiceTick(dt);
+        if (_pendingCards > 0 && _phase == Phase.Run) OpenLevelUpCards();
 
         Director(dt, minutes);
         Mobs(dt);
@@ -303,7 +325,8 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
 
     private void Blades(float minutes)
     {
-        float dmg = 10f * (1f + _levelUps * 0.06f) * Kinematics.PowerFromLevels(_levelUps);
+        if (!_bladesOn) return;
+        float dmg = _bladeStats.Damage * PowerMult;
         for (int b = 0; b < BladesN; b++)
         {
             float a = (_bladeAngle + 360f / BladesN * b) * MathF.PI / 180f;
@@ -391,6 +414,7 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
             Kind = kind,
             X = SpawnPos().X, Y = SpawnPos().Y,
             Hp = WaveScript.ScaledHp(minutes, kind) * (elite ? WaveScript.WaveConstants.Elite_HpMult : 1),
+            MaxHp = WaveScript.ScaledHp(minutes, kind) * (elite ? WaveScript.WaveConstants.Elite_HpMult : 1),
             Speed = b.Speed * (elite ? WaveScript.WaveConstants.Elite_SpeedMult : 1),
             Damage = WaveScript.ScaledDamage(minutes, kind) * (elite ? WaveScript.WaveConstants.Elite_DamageMult : 1),
             Size = elite ? WaveScript.WaveConstants.Elite_SizeMult : 1f,
@@ -472,13 +496,14 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
     {
         if (_phase != Phase.Run) return;
         if (_runTime - _lastHurt < 0.5f) return;
-        _hp = Math.Max(0f, _hp - Math.Max(1f, raw));
+        _hp = Math.Max(0f, _hp - MathF.Max(1f, raw - ArmorFlat));
         _lastHurt = _runTime;
         if (_hp <= 0f)
         {
             _phase = Phase.Dead;
             _endedAt = Java.Lang.JavaSystem.CurrentTimeMillis();
             if (_survival && _runTime > _bestSurv) _bestSurv = _runTime;
+            AwardRunEnd();
             global::Android.Util.Log.Info("Game", $"DEAD t={_runTime:0}s mode={(_survival ? "surv" : "camp")} kills={_kills}");
         }
     }
@@ -486,6 +511,8 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
     private void HurtMob(Mob m, float dmg)
     {
         m.Hp -= dmg;
+        m.HitAt = _runTime;
+        SpawnDmg(m.X, m.Y - 0.3f, MathF.Round(dmg), dmg >= 26f);
         if (m.Hp > 0) return;
         _kills++;
         if (m.Elite) _elites++;
@@ -493,9 +520,11 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
         {
             _bossesKilled++;
             _orbs.Add(new Orb { X = m.X, Y = m.Y, Value = GameBalance.Boss_XP });
+            OpenBigChest();
             if (ReferenceEquals(_bossAlive, m)) _bossAlive = null;
             m.Hp = 0;
-            if (m.FinalBoss) { _phase = Phase.Victory; _endedAt = Java.Lang.JavaSystem.CurrentTimeMillis(); }
+            DeathBurst(m);
+            if (m.FinalBoss) { _phase = Phase.Victory; _endedAt = Java.Lang.JavaSystem.CurrentTimeMillis(); AwardRunEnd(); }
             return;
         }
         if (m.Elite)
@@ -503,7 +532,7 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
             if (_eliteDropIndex % 2 == 0)
                 _orbs.Add(new Orb { X = m.X, Y = m.Y, Value = GameBalance.Elite_BombXP });
             else
-                _xp = XpCurve.Need(_level); // малый сундук ≈ мгновенный уровень
+                OpenSmallChest();
             _eliteDropIndex++;
         }
         else
@@ -511,6 +540,7 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
             int[] xp = { 1, 1, 3, 2, 1, 1 };
             _orbs.Add(new Orb { X = m.X, Y = m.Y, Value = xp[(int)m.Kind] });
         }
+        DeathBurst(m);
         m.Hp = 0;
     }
 
@@ -518,11 +548,12 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
 
     private void AddXp(double v)
     {
-        _xp += v;
+        _xp += v * XpMult;
         while (_xp >= XpCurve.Need(_level))
         {
             _xp -= XpCurve.Need(_level);
             _level++; _levelUps++;
+            _pendingCards++;
         }
     }
 
@@ -609,7 +640,7 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
 
         if (_phase == Phase.Run)
         {
-            for (int b = 0; b < BladesN; b++)
+            for (int b = 0; _bladesOn && b < BladesN; b++)
             {
                 float a = (_bladeAngle + 360f / BladesN * b) * MathF.PI / 180f;
                 Sprite(c, "sword", _px + MathF.Cos(a) * BladeR, _py + MathF.Sin(a) * BladeR,
@@ -639,7 +670,9 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
         c.DrawText($"{mm}:{ss:00}  LVL{_level}  K{_kills} E{_elites} B{_bossesKilled}  ~{meat}kg  HP {_hp:0}",
             12 * _density, 24 * _density, _p);
         _p.Color = Color.Rgb(6, 214, 160);
-        c.DrawRect(0, 0, Width * Math.Clamp(_hp / GameBalance.Player_MaxHP, 0f, 1f), 5 * _density, _p);
+        c.DrawRect(0, 0, Width * Math.Clamp(_hp / _maxHp, 0f, 1f), 5 * _density, _p);
+
+        RenderOverlays(c, cx, cy);
 
         if (_phase == Phase.Run)
         {
@@ -680,11 +713,12 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
             c.DrawText(tag, cx - _p.MeasureText(tag) / 2, Height * 0.21f, _p);
             DrawBtn(c, 0, "КАМПАНИЯ · 15 МИН");
             DrawBtn(c, 1, "ВЫЖИВАНИЕ · ∞");
+            DrawBtn(c, 7, $"ДЕРЕВО СТАТОВ · 🍖 {_save.Meat}");
             _p.SetStyle(Paint.Style.Fill);
             _p.TextSize = 14 * _density;
             _p.Color = Color.Rgb(184, 189, 212);
-            string rec = _bestSurv > 0 ? $"рекорд выживания: {_bestSurv:0} сек" : "две кнопки выше — два режима";
-            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.62f, _p);
+            string rec = _bestSurv > 0 ? $"рекорд выживания: {_bestSurv:0} сек" : "карточки апгрейдов — каждые 20-30 секунд";
+            c.DrawText(rec, cx - _p.MeasureText(rec) / 2, Height * 0.70f, _p);
             return;
         }
 
@@ -728,10 +762,13 @@ public class GameView : TextureView, TextureView.ISurfaceTextureListener
             float sz = 46 * _density;
             return new RectF(Width - sz - 16 * _density, 30 * _density, Width - 16 * _density, 30 * _density + sz);
         }
-        float cyF = slot switch { 0 => 0.34f, 1 => 0.47f, 2 => 0.60f, 3 => 0.725f, 4 => 0.42f, 5 => 0.565f, _ => 0.5f };
+        float cyF = slot switch { 0 => 0.34f, 1 => 0.47f, 2 => 0.60f, 3 => 0.725f, 4 => 0.42f, 5 => 0.565f, 7 => 0.60f, 8 => 0.885f, _ => 0.5f };
         float cy = cyF * Height;
         return new RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
     }
+
+    private bool InRect(MotionEvent e, RectF r) =>
+        e.GetX() >= r.Left && e.GetX() <= r.Right && e.GetY() >= r.Top && e.GetY() <= r.Bottom;
 
     private bool InBtn(MotionEvent e, int slot)
     {
