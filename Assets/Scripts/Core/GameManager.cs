@@ -12,10 +12,13 @@ public class GameManager : MonoBehaviour
     public GameState State { get; private set; } = GameState.Menu;
     public float RunTime { get; private set; }
     public int Deaths { get; private set; }
+    public bool LastRunWasVictory { get; private set; }
 
     public event Action<GameState> OnStateChanged;
     public event Action OnRunStarted;
     public event Action<float> OnRunTimer;
+
+    private bool reviveUsedThisRun;
 
     private void Awake()
     {
@@ -39,33 +42,49 @@ public class GameManager : MonoBehaviour
         if (State != GameState.Playing) return;
         RunTime += Time.deltaTime;
         OnRunTimer?.Invoke(RunTime);
-        if (RunTime >= runDuration) HandleDeath();
     }
 
     public void StartRun()
     {
         RunTime = 0f;
+        LastRunWasVictory = false;
+        reviveUsedThisRun = false;
+        SaveSystem.EnsureDay();
         Time.timeScale = 1f;
         SetState(GameState.Playing);
         OnRunStarted?.Invoke();
     }
 
+    public float RunDuration => runDuration;
+
     public void HandleDeath()
     {
         if (State != GameState.Playing) return;
         Deaths++;
+        LastRunWasVictory = false;
+        CommitRunEnd();
+        Time.timeScale = 0f;
+        SetState(GameState.Dead);
+    }
+
+    public void Victory()
+    {
+        if (State != GameState.Playing) return;
+        LastRunWasVictory = true;
+        CommitRunEnd();
         Time.timeScale = 0f;
         SetState(GameState.Dead);
     }
 
     public void TryRevive()
     {
-        AdsManager.Instance.TryShowRewarded("revive", rewarded =>
+        if (reviveUsedThisRun) return;
+        AdsManager.Instance.TryShowRewarded(AdPlacements.Revive, rewarded =>
         {
             if (!rewarded) return;
+            reviveUsedThisRun = true;
             var player = FindFirstByType<PlayerController>();
-            if (player == null) return;
-            player.Revive();
+            if (player != null) player.Revive();
             Time.timeScale = 1f;
             SetState(GameState.Playing);
         });
@@ -73,8 +92,13 @@ public class GameManager : MonoBehaviour
 
     public void Restart()
     {
-        AdsManager.Instance.MaybeShowInterstitial("game_over");
+        AdsManager.Instance.MaybeShowInterstitial("restart");
         SceneLoader.ReloadGame();
+    }
+
+    private void CommitRunEnd()
+    {
+        SaveSystem.RegisterRunEnd(RunTime);
     }
 
     private void SetState(GameState newState)

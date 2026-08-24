@@ -20,6 +20,8 @@ public class ObjectPool<T> where T : Component
 
     public int ActiveCount => activeSet.Count;
 
+    public List<T> ActiveSnapshot() => new(activeSet);
+
     public T Get()
     {
         T item = free.Count > 0 ? free.Dequeue() : Create();
@@ -45,7 +47,7 @@ public class ObjectPool<T> where T : Component
 
     private T Create()
     {
-        T item = Object.Instantiate(prefab, parent);
+        T item = UnityEngine.Object.Instantiate(prefab, parent);
         item.gameObject.SetActive(false);
         return item;
     }

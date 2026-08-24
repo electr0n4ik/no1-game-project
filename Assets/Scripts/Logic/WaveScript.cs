@@ -37,6 +37,14 @@ namespace Rubilovo.Logic
 
         public static EnemyBaseStats Base(EnemyKind kind) => Bases[(int)kind];
 
+        public static readonly float[] BossScheduleMinutes = { 4f, 8f, 12f, 15f };
+
+        public static BossStats BossByIndex(int index)
+        {
+            int i = index < 0 ? 0 : (index >= Bosses.Length ? Bosses.Length - 1 : index);
+            return Bosses[i];
+        }
+
         public static int BossCount => Bosses.Length;
 
         public static bool TryBossAtMinute(float elapsedMinutes, out BossStats boss)
@@ -129,8 +137,8 @@ namespace Rubilovo.Logic
         public static class WaveConstants
         {
             public const float BossPauseMinutes = 1f;
-            public const float EliteTimerMinSec = 60f;
-            public const float EliteTimerMaxSec = 90f;
+            public const float Elite_TimerMinSec = 60f;
+            public const float Elite_TimerMaxSec = 90f;
             public const float Elite_FromMinute = 3f;
             public const float Elite_HpMult = 6f;
             public const float Elite_DamageMult = 1.5f;

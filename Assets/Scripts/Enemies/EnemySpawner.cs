@@ -1,8 +1,8 @@
 using System.Collections;
+using Rubilovo.Logic;
 using UnityEngine;
 
-[DefaultExecutionOrder(-80)]
-public class EnemySpawner : MonoBehaviour
+public class WaveDirector : MonoBehaviour
 {
     [SerializeField] private Enemy enemyPrefab;
     [SerializeField] private XpOrb xpOrbPrefab;
@@ -10,19 +10,18 @@ public class EnemySpawner : MonoBehaviour
     [SerializeField] private Transform player;
     [SerializeField] private Camera mainCamera;
 
-    [Header("Difficulty")]
-    [SerializeField] private float spawnIntervalStart = 0.8f;
-    [SerializeField] private float minInterval = 0.15f;
-    [SerializeField] private float intervalRamp = 0.97f;
-    [SerializeField] private int maxAlive = 80;
-    [SerializeField] private float baseHp = 18f;
-    [SerializeField] private float baseSpeed = 2.2f;
-
     private ObjectPool<Enemy> enemies;
     private ObjectPool<XpOrb> orbs;
+    private readonly System.Random rng = new();
+
     private Coroutine loop;
-    private float interval;
-    private bool running;
+    private int spawnNumber;
+    private readonly bool[] bossSpawned = new bool[4];
+    private Enemy bossAlive;
+    private bool bossFightActive;
+    private bool finalPending;
+    private float eliteTimer;
+    private int eliteDropIndex;
 
     private void Awake()
     {
@@ -32,15 +31,15 @@ public class EnemySpawner : MonoBehaviour
 
     private void OnEnable()
     {
+        GameManager.Instance.OnRunStarted += HandleRunStarted;
         GameManager.Instance.OnStateChanged += HandleState;
-        GameManager.Instance.OnRunStarted += ResetPools;
     }
 
     private void OnDisable()
     {
         if (GameManager.Instance == null) return;
+        GameManager.Instance.OnRunStarted -= HandleRunStarted;
         GameManager.Instance.OnStateChanged -= HandleState;
-        GameManager.Instance.OnRunStarted -= ResetPools;
     }
 
     private void HandleState(GameState state)
@@ -51,10 +50,174 @@ public class EnemySpawner : MonoBehaviour
                 StopLoop();
                 break;
             case GameState.Playing when !running:
-                interval = spawnIntervalStart;
                 loop = StartCoroutine(SpawnLoop());
                 break;
         }
+    }
+
+    private bool running;
+
+    private void HandleRunStarted()
+    {
+        StopLoop();
+        ResetPools();
+        spawnNumber = 0;
+        for (int i = 0; i < bossSpawned.Length; i++) bossSpawned[i] = false;
+        bossAlive = null;
+        bossFightActive = false;
+        eliteDropIndex = 0;
+        eliteTimer = UnityEngine.Random.Range(WaveScript.WaveConstants.Elite_TimerMinSec,
+                                  WaveScript.WaveConstants.Elite_TimerMaxSec);
+        RunTracker.Instance?.ResetRun();
+    }
+
+    private void Update()
+    {
+        if (GameManager.Instance == null || GameManager.Instance.State != GameState.Playing) return;
+        float minutes = GameManager.Instance.RunTime / 60f;
+
+        TrySpawnBoss(minutes);
+
+        if (bossFightActive && bossAlive == null)
+            bossFightActive = false;
+
+        if (!bossFightActive && minutes >= WaveScript.WaveConstants.Elite_FromMinute)
+        {
+            eliteTimer -= Time.deltaTime;
+            if (eliteTimer <= 0f)
+            {
+                SpawnElite(minutes);
+                eliteTimer = UnityEngine.Random.Range(WaveScript.WaveConstants.Elite_TimerMinSec,
+                                          WaveScript.WaveConstants.Elite_TimerMaxSec);
+            }
+        }
+    }
+
+    private void TrySpawnBoss(float minutes)
+    {
+        if (bossFightActive) return;
+        for (int i = 0; i < WaveScript.BossScheduleMinutes.Length; i++)
+        {
+            if (bossSpawned[i]) continue;
+            if (minutes < WaveScript.BossScheduleMinutes[i]) continue;
+
+            bossSpawned[i] = true;
+            bossFightActive = true;
+            finalPending = i == WaveScript.BossScheduleMinutes.Length - 1;
+
+            Enemy boss = enemies.Get();
+            boss.transform.position = RingPosition();
+            boss.SetupBoss(player, WaveScript.BossByIndex(i), OnEnemyDeath);
+            bossAlive = boss;
+            CameraFollow.Instance?.Punch(0.25f, 0.25f);
+            return;
+        }
+    }
+
+    private void SpawnElite(float minutes)
+    {
+        Enemy elite = null;
+        foreach (Enemy candidate in enemies.ActiveSnapshot())
+        {
+            if (candidate.IsBoss || candidate.IsElite) continue;
+            elite = candidate;
+            break;
+        }
+        if (elite != null)
+            elite.Setup(player, elite.Kind, minutes, OnEnemyDeath, elite: true);
+        else
+        {
+            elite = enemies.Get();
+            elite.transform.position = RingPosition();
+            elite.Setup(player, (EnemyKind)UnityEngine.Random.Range(0, 6), minutes, OnEnemyDeath, elite: true);
+        }
+    }
+
+    private IEnumerator SpawnLoop()
+    {
+        running = true;
+        while (true)
+        {
+            yield return new WaitForSeconds(WaveScript.SpawnInterval(spawnNumber));
+            if (GameManager.Instance.State != GameState.Playing) continue;
+            if (bossFightActive) continue;
+            SpawnWave();
+        }
+    }
+
+    private void SpawnWave()
+    {
+        float minutes = GameManager.Instance.RunTime / 60f;
+        int cap = WaveScript.AliveCap(minutes);
+        if (enemies.ActiveCount >= cap) return;
+
+        spawnNumber++;
+        int batch = Mathf.Min(WaveScript.BatchSize(minutes), cap - enemies.ActiveCount);
+        var kinds = WaveScript.RollWaveComposition(minutes, batch, rng);
+        foreach (EnemyKind kind in kinds)
+        {
+            Enemy enemy = enemies.Get();
+            enemy.transform.position = RingPosition();
+            enemy.Setup(player, kind, minutes, OnEnemyDeath);
+        }
+    }
+
+    private Vector3 RingPosition()
+    {
+        float halfHeight = mainCamera.orthographicSize + GameBalance.Spawn_RingExtra;
+        float halfWidth = halfHeight * mainCamera.aspect;
+        float r = Mathf.Max(halfWidth, halfHeight);
+        Vector2 center = player.position;
+        float lim = GameBalance.Arena_Clamp;
+
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            Vector2 dir = UnityEngine.Random.insideUnitCircle.normalized;
+            Vector2 p = center + dir * r;
+            p.x = Mathf.Clamp(p.x, -lim, lim);
+            p.y = Mathf.Clamp(p.y, -lim, lim);
+            if (Vector2.Distance(p, center) >= GameBalance.Spawn_RerollMinDist || attempt == 7) return p;
+        }
+        return center + Vector2.up * r;
+    }
+
+    private void OnEnemyDeath(Enemy enemy)
+    {
+        if (!enemy.RewardlessDeath)
+        {
+            RunTracker.Instance?.RegisterKill(enemy.Kind, enemy.IsElite, enemy.IsBoss);
+
+            if (enemy.IsBoss)
+            {
+                DropOrb(enemy.transform.position, GameBalance.Boss_XP);
+                LevelUpController.Instance?.OpenBigChest();
+                bossAlive = null;
+                if (finalPending)
+                {
+                    finalPending = false;
+                    GameManager.Instance.Victory();
+                }
+            }
+            else if (enemy.IsElite)
+            {
+                if (eliteDropIndex % 2 == 0) DropOrb(enemy.transform.position, GameBalance.Elite_BombXP);
+                else LevelUpController.Instance?.OpenSmallChest();
+                eliteDropIndex++;
+            }
+            else if (enemy.XpValue > 0f)
+            {
+                DropOrb(enemy.transform.position, enemy.XpValue);
+            }
+        }
+
+        enemies.Release(enemy);
+    }
+
+    private void DropOrb(Vector3 position, float value)
+    {
+        XpOrb orb = orbs.Get();
+        orb.transform.position = position;
+        orb.Init(player, value, o => orbs.Release(o));
     }
 
     private void StopLoop()
@@ -64,48 +227,8 @@ public class EnemySpawner : MonoBehaviour
         loop = null;
     }
 
-    private IEnumerator SpawnLoop()
-    {
-        running = true;
-        while (true)
-        {
-            yield return new WaitForSeconds(interval);
-            SpawnWave();
-            interval = Mathf.Max(minInterval, interval * intervalRamp);
-        }
-    }
-
-    private void SpawnWave()
-    {
-        if (enemies.ActiveCount >= maxAlive) return;
-        float t = GameManager.Instance.RunTime;
-        float difficulty = 1f + t / 45f;
-        Enemy enemy = enemies.Get();
-        enemy.transform.position = RingPosition();
-        enemy.Setup(player, baseHp * difficulty, baseSpeed * (0.85f + difficulty * 0.08f), OnEnemyDeath);
-    }
-
-    private Vector3 RingPosition()
-    {
-        float halfHeight = mainCamera.orthographicSize + 1.5f;
-        float halfWidth = halfHeight * mainCamera.aspect;
-        Vector2 center = player.position;
-        Vector2 dir = Random.insideUnitCircle.normalized;
-        float r = Mathf.Max(halfWidth, halfHeight);
-        return center + dir * r;
-    }
-
-    private void OnEnemyDeath(Enemy enemy)
-    {
-        XpOrb orb = orbs.Get();
-        orb.transform.position = enemy.transform.position;
-        orb.Init(player, enemy.XpReward, o => orbs.Release(o));
-        enemies.Release(enemy);
-    }
-
     private void ResetPools()
     {
-        StopLoop();
         enemies.ReleaseAll();
         orbs.ReleaseAll();
     }
