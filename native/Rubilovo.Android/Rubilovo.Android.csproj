@@ -9,8 +9,8 @@
     <AssemblyName>Rubilovo.Android</AssemblyName>
     <ApplicationId>ru.no1game.rubilovo</ApplicationId>
     <ApplicationTitle>Рубилово</ApplicationTitle>
-    <ApplicationVersion>1</ApplicationVersion>
-    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>2</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2.0</ApplicationDisplayVersion>
     <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidLinkMode>None</AndroidLinkMode>
