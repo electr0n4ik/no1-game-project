@@ -40,5 +40,11 @@ $ADB logcat -d -s Game:* Monodroid:*   # наш тег + managed
 | `Android.Util` не найден | наш ns `Rubilovo.Android` перехватывает | писать `global::Android.Util.Log` |
 | csproj не коммитится | gitignore `*.csproj` | негатив-правила уже в .gitignore |
 
-## 5. Правило
+## 5. Чёрный screencap ≠ чёрный экран
+Если скриншот 24 КБ и байт-в-байт идентичен предыдущему — проверь
+`adb shell "dumpsys display | grep -m1 mScreenState"`: при OFF автолок
+выключил экран, игра при этом может жить (см. posted в логе).
+Разбудить: `input keyevent KEYCODE_WAKEUP` + `wm dismiss-keyguard`.
+
+## 6. Правило
 Любой новый грабль с устройства заносить в таблицу §4 тем же коммитом.
