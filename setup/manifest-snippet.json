@@ -1,0 +1,12 @@
+{
+  "scopedRegistries": [
+    {
+      "name": "OpenUPM",
+      "url": "https://package.openupm.com",
+      "scopes": ["com.yandex", "com.google"]
+    }
+  ],
+  "dependencies": {
+    "com.yandex.mobileads": "8.3.0"
+  }
+}
