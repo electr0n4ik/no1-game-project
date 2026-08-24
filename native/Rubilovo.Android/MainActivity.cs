@@ -42,6 +42,11 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
         public float X, Y, Hp, Speed, Damage, Size = 1f;
         public bool Elite, Boss, FinalBoss, Rewardless;
         public float MaxHp, HitAt = -9f, SlowUntil;
+        public int BossState;
+        public float StateTimer, PatternCd = 3f, TgtX, TgtY, DashVx, DashVy;
+        public int Slot;
+        public bool SecondDash;
+        public int Pattern;
     }
 
     private sealed class Shot { public float X, Y, Vx, Vy, Life, Damage; }
@@ -86,6 +91,9 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
     private readonly Paint _p = new() { AntiAlias = true };
     private readonly Paint _bp = new() { AntiAlias = true, FilterBitmap = true };
     private readonly Dictionary<string, Bitmap?> _art = new();
+    private global::Android.Media.SoundPool? _sp;
+    private readonly Dictionary<string, int> _snd = new();
+    private float _lastHitSnd;
     private float _face;
 
     public GameView(Context context) : base(context)
@@ -124,6 +132,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
         _running = true;
         _density = Resources!.DisplayMetrics.Density;
         LoadArt();
+        LoadSfx();
         new Thread(Loop) { IsBackground = true }.Start();
     }
 
@@ -139,6 +148,32 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             int id = Resources!.GetIdentifier(n, "drawable", Context!.PackageName);
             _art[n] = id != 0 ? BitmapFactory.DecodeResource(Resources, id) : null;
         }
+    }
+
+    private void LoadSfx()
+    {
+        try
+        {
+            _sp = new global::Android.Media.SoundPool.Builder()
+                .SetMaxStreams(4)
+                .SetAudioAttributes(new global::Android.Media.AudioAttributes.Builder()
+                    .SetUsage(global::Android.Media.AudioUsageKind.Game)
+                    .SetContentType(global::Android.Media.AudioContentType.Sonification)
+                    .Build())
+                .Build();
+            foreach (string n in new[] { "hit", "kill", "levelup", "chest", "death", "boss", "shoot" })
+            {
+                int id = Resources!.GetIdentifier(n, "raw", Context!.PackageName);
+                if (id != 0) _snd[n] = _sp.Load(Context, id, 1);
+            }
+        }
+        catch { _sp = null; }
+    }
+
+    private void Play(string name, float vol = 0.7f)
+    {
+        if (_sp == null || !_snd.TryGetValue(name, out int id)) return;
+        _sp.Play(id, 1f, vol, 1, 0, 1f);
     }
 
     private static string KindSprite(EnemyKind k) =>
@@ -461,7 +496,11 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             if (m.Hp <= 0) { _mobs.RemoveAt(i); continue; }
 
             float dx = _px - m.X, dy = _py - m.Y, d = MathF.Sqrt(dx * dx + dy * dy);
-            if (d > 0.01f) { m.X += dx / d * m.Speed * dt; m.Y += dy / d * m.Speed * dt; }
+
+            if (m.Boss) { BossAi(m, dt, dx, dy, d); }
+            else if (d > 0.01f) { m.X += dx / d * m.Speed * dt; m.Y += dy / d * m.Speed * dt; }
+
+            if (m.Boss) { TouchCheck(m, d, dt); continue; }
 
             if (m.Kind == EnemyKind.Shooter)
             {
@@ -492,6 +531,92 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
         }
     }
 
+    private void TouchCheck(Mob m, float d, float dt)
+    {
+        float touch = 0.45f * ScaleNow + 0.4f * m.Size;
+        if (d < touch && _runTime - _touchCd.GetValueOrDefault(m, -9f) >= GameBalance.Contact_HitCooldownEnemy)
+        {
+            _touchCd[m] = _runTime;
+            Hurt(m.Damage);
+        }
+    }
+
+    private void BossAi(Mob m, float dt, float dx, float dy, float d)
+    {
+        m.PatternCd -= dt;
+        switch (m.BossState)
+        {
+            case 0:
+                if (d > 0.01f)
+                {
+                    float sp = m.Speed * 0.6f;
+                    m.X += dx / d * sp * dt;
+                    m.Y += dy / d * sp * dt;
+                }
+                if (m.PatternCd <= 0)
+                {
+                    bool ring = m.Slot == 1 || (m.Slot == 3 && m.SecondDash);
+                    m.Pattern = ring ? 1 : 0;
+                    m.StateTimer = ring ? WaveScript.WaveConstants.Ring_TelegraphSec
+                                        : WaveScript.WaveConstants.Dash_TelegraphSec;
+                    m.TgtX = _px; m.TgtY = _py;
+                    m.BossState = 1;
+                    Play("boss", 0.6f);
+                }
+                break;
+
+            case 1:
+                m.StateTimer -= dt;
+                if (m.StateTimer > 0) break;
+                if (m.Pattern == 0)
+                {
+                    (float nx, float ny) = Norm(m.TgtX - m.X, m.TgtY - m.Y);
+                    m.DashVx = nx * WaveScript.WaveConstants.Dash_Speed;
+                    m.DashVy = ny * WaveScript.WaveConstants.Dash_Speed;
+                    m.StateTimer = 1.2f;
+                    m.BossState = 2;
+                }
+                else
+                {
+                    for (int k = 0; k < WaveScript.WaveConstants.Ring_Projectiles; k++)
+                    {
+                        float a2 = k * MathF.PI * 2f / WaveScript.WaveConstants.Ring_Projectiles;
+                        _shots.Add(new Shot { X = m.X, Y = m.Y,
+                            Vx = MathF.Cos(a2) * WaveScript.WaveConstants.Ring_ProjectileSpeed,
+                            Vy = MathF.Sin(a2) * WaveScript.WaveConstants.Ring_ProjectileSpeed,
+                            Life = 3f, Damage = m.Damage });
+                    }
+                    FinishBossPattern(m);
+                }
+                break;
+
+            case 2:
+                m.StateTimer -= dt;
+                m.X += m.DashVx * dt;
+                m.Y += m.DashVy * dt;
+                m.X = Math.Clamp(m.X, -ArenaClamp, ArenaClamp);
+                m.Y = Math.Clamp(m.Y, -ArenaClamp, ArenaClamp);
+                if (m.StateTimer <= 0)
+                {
+                    if (m.Slot == 2 && !m.SecondDash)
+                    {
+                        m.SecondDash = true;
+                        m.PatternCd = 0.4f;
+                        m.BossState = 0;
+                    }
+                    else FinishBossPattern(m);
+                }
+                break;
+        }
+    }
+
+    private void FinishBossPattern(Mob m)
+    {
+        m.BossState = 0;
+        m.SecondDash = false;
+        m.PatternCd = WaveScript.WaveConstants.Dash_Cooldown;
+    }
+
     private void Hurt(float raw)
     {
         if (_phase != Phase.Run) return;
@@ -505,6 +630,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             if (_survival && _runTime > _bestSurv) _bestSurv = _runTime;
             AwardRunEnd();
             global::Android.Util.Log.Info("Game", $"DEAD t={_runTime:0}s mode={(_survival ? "surv" : "camp")} kills={_kills}");
+            Play("death", 0.9f);
         }
     }
 
@@ -513,6 +639,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
         m.Hp -= dmg;
         m.HitAt = _runTime;
         SpawnDmg(m.X, m.Y - 0.3f, MathF.Round(dmg), dmg >= 26f);
+        if (_runTime - _lastHitSnd > 0.06f) { _lastHitSnd = _runTime; Play("hit", 0.35f); }
         if (m.Hp > 0) return;
         _kills++;
         if (m.Elite) _elites++;
@@ -541,6 +668,7 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
             _orbs.Add(new Orb { X = m.X, Y = m.Y, Value = xp[(int)m.Kind] });
         }
         DeathBurst(m);
+        Play("kill", 0.5f);
         m.Hp = 0;
     }
 
@@ -635,6 +763,24 @@ public partial class GameView : TextureView, TextureView.ISurfaceTextureListener
                 _p.StrokeWidth = 3;
                 _p.Color = Color.Rgb(239, 71, 111);
                 c.DrawCircle(X(m.X), Y(m.Y), 0.55f * m.Size * ppu + 5, _p);
+            }
+
+            if (m.Boss && m.BossState == 1)
+            {
+                float pulse = 0.5f + 0.5f * MathF.Floor(_runTime * 8f % 2f);
+                _p.SetStyle(Paint.Style.Stroke);
+                _p.StrokeWidth = 3;
+                _p.Color = Color.Argb((int)(140 + 80 * pulse), 239, 71, 111);
+                if (m.Pattern == 0)
+                {
+                    c.DrawLine(X(m.X), Y(m.Y), X(m.TgtX), Y(m.TgtY), _p);
+                    c.DrawCircle(X(m.TgtX), Y(m.TgtY), 12 * _density, _p);
+                }
+                else
+                {
+                    float rr = (1f - m.StateTimer / WaveScript.WaveConstants.Ring_TelegraphSec) * 3.5f * ppu;
+                    c.DrawCircle(X(m.X), Y(m.Y), MathF.Max(8f, rr), _p);
+                }
             }
         }
 
