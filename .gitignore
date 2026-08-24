@@ -30,3 +30,7 @@ crashlytics-build.properties
 /[Aa]ssets/AssetStoreTools*
 .vs/
 .idea/
+
+[Bb]in/
+[Oo]bj/
+*.user
