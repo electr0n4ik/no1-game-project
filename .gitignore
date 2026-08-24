@@ -34,3 +34,6 @@ crashlytics-build.properties
 [Bb]in/
 [Oo]bj/
 *.user
+
+# dotnet test project must be tracked
+!tests/**/*.csproj
