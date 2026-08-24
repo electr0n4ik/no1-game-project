@@ -42,16 +42,20 @@ public partial class GameView
         _wcd.Clear(); _auraHit.Clear();
         _pendingCards = 0; _cards.Clear();
         _whipBackAt = -1f; _comboShown = 0; _toastUntil = 0;
+        _evolved.Clear();
     }
 
     private void WeaponsTick(float dt)
     {
         int blvl = _loadout.WeaponLevels[(int)WeaponId.Blades];
         _bladeStats = WeaponsCatalog.Stats(WeaponId.Blades, blvl);
+        if (_evolved.Contains(WeaponId.Blades))
+            _bladeStats = new WeaponLevelStats { Damage = 26f, Count = 6, Radius = 1.6f, SpeedDeg = 320f };
         _bladesN = _bladeStats.Count;
         _bladeR = _bladeStats.Radius * AreaMult;
         _bladeAngle = (_bladeAngle + _bladeStats.SpeedDeg * dt) % 360f;
-        if (blvl >= 4)
+        if (_evolved.Contains(WeaponId.Blades)) _bladesOn = true;
+        else if (blvl >= 4)
         {
             _bladeUptime += dt;
             float cycle = _bladeStats.UptimeSec + _bladeStats.Extra;
@@ -99,6 +103,8 @@ public partial class GameView
         int lvl = _loadout.WeaponLevels[(int)WeaponId.Daggers];
         if (lvl == 0) return;
         WeaponLevelStats s = WeaponsCatalog.Stats(WeaponId.Daggers, lvl);
+        float spread = 8f;
+        if (_evolved.Contains(WeaponId.Daggers)) { s = new WeaponLevelStats { Damage = 12f, Count = 6, CooldownSec = 0.70f, Extra = 3f }; spread = 12f; }
         _wcd.TryGetValue(WeaponId.Daggers, out float cd);
         cd -= dt;
         if (cd > 0) { _wcd[WeaponId.Daggers] = cd; return; }
@@ -108,7 +114,7 @@ public partial class GameView
         (float nx, float ny) = Norm(target.X - _px, target.Y - _py);
         for (int i = 0; i < s.Count; i++)
         {
-            float sp = (i - (s.Count - 1) * 0.5f) * 8f * MathF.PI / 180f;
+            float sp = (i - (s.Count - 1) * 0.5f) * spread * MathF.PI / 180f;
             float vx = nx * MathF.Cos(sp) - ny * MathF.Sin(sp);
             float vy = nx * MathF.Sin(sp) + ny * MathF.Cos(sp);
             _pshots.Add(new PBullet
@@ -128,6 +134,7 @@ public partial class GameView
         int lvl = _loadout.WeaponLevels[(int)WeaponId.Axe];
         if (lvl == 0) return;
         WeaponLevelStats s = WeaponsCatalog.Stats(WeaponId.Axe, lvl);
+        if (_evolved.Contains(WeaponId.Axe)) s = new WeaponLevelStats { Damage = 40f, Count = 6, CooldownSec = s.CooldownSec };
         _wcd.TryGetValue(WeaponId.Axe, out float cd);
         cd -= dt / CooldownMult;
         if (cd > 0) { _wcd[WeaponId.Axe] = cd; return; }
@@ -151,6 +158,8 @@ public partial class GameView
         int lvl = _loadout.WeaponLevels[(int)WeaponId.Lightning];
         if (lvl == 0) return;
         WeaponLevelStats s = WeaponsCatalog.Stats(WeaponId.Lightning, lvl);
+        bool chain = _evolved.Contains(WeaponId.Lightning);
+        if (chain) s = new WeaponLevelStats { Damage = s.Damage, Count = 4, CooldownSec = 1.0f, Radius = s.Radius };
         _wcd.TryGetValue(WeaponId.Lightning, out float cd);
         cd -= dt / CooldownMult;
         if (cd > 0) { _wcd[WeaponId.Lightning] = cd; return; }
@@ -170,6 +179,18 @@ public partial class GameView
                 if (dx * dx + dy * dy <= r * r) HurtMob(m, s.Damage * PowerMult);
             }
             SpawnBolt(t.X, t.Y);
+            if (chain)
+            {
+                float fall = 0.6f;
+                var near = pool.OrderBy(o => MathF.Pow(o.X - t.X, 2) + MathF.Pow(o.Y - t.Y, 2)).Take(2).ToList();
+                foreach (var cn in near)
+                {
+                    HurtMob(cn, s.Damage * PowerMult * fall);
+                    SpawnBolt(cn.X, cn.Y);
+                    fall *= 0.6f;
+                    pool.Remove(cn);
+                }
+            }
             pool.Remove(t);
         }
     }
@@ -179,9 +200,11 @@ public partial class GameView
         int lvl = _loadout.WeaponLevels[(int)WeaponId.Aura];
         if (lvl == 0) return;
         WeaponLevelStats s = WeaponsCatalog.Stats(WeaponId.Aura, lvl);
+        bool void_ = _evolved.Contains(WeaponId.Aura);
+        if (void_) s = new WeaponLevelStats { Damage = 14f, Radius = 3.0f, Extra = 0.25f };
         _auraCd -= dt;
         if (_auraCd > 0) return;
-        _auraCd = WeaponsCatalog.Aura_TickSec;
+        _auraCd = void_ ? 0.4f : WeaponsCatalog.Aura_TickSec;
         float r = s.Radius * AreaMult;
         foreach (Mob m in _mobs)
         {
@@ -190,9 +213,15 @@ public partial class GameView
             if (dx * dx + dy * dy > r * r) continue;
             float next = _auraHit.TryGetValue(m, out float t) ? t : 0f;
             if (_runTime < next) continue;
-            _auraHit[m] = _runTime + WeaponsCatalog.Aura_RehitSec;
+            _auraHit[m] = _runTime + (void_ ? 0.75f : WeaponsCatalog.Aura_RehitSec);
             HurtMob(m, s.Damage * PowerMult);
-            if (lvl >= 5) m.SlowUntil = _runTime + 0.6f;
+            if (void_ || lvl >= 5) m.SlowUntil = _runTime + 0.6f;
+            if (void_)
+            {
+                (float px2, float py2) = Norm(_px - m.X, _py - m.Y);
+                m.X += px2 * 0.8f * WeaponsCatalog.Aura_TickSec;
+                m.Y += py2 * 0.8f * WeaponsCatalog.Aura_TickSec;
+            }
         }
     }
 
@@ -201,6 +230,7 @@ public partial class GameView
         int lvl = _loadout.WeaponLevels[(int)WeaponId.Whip];
         if (lvl == 0) return;
         WeaponLevelStats s = WeaponsCatalog.Stats(WeaponId.Whip, lvl);
+        bool circle = _evolved.Contains(WeaponId.Whip);
         _wcd.TryGetValue(WeaponId.Whip, out float cd);
         cd -= dt / CooldownMult;
         if (_whipBackAt > 0 && _runTime >= _whipBackAt)
@@ -210,6 +240,21 @@ public partial class GameView
         }
         if (cd > 0) { _wcd[WeaponId.Whip] = cd; return; }
         cd = s.CooldownSec; _wcd[WeaponId.Whip] = cd;
+        if (circle)
+        {
+            float vamp = 0f;
+            foreach (Mob m in _mobs)
+            {
+                if (m.Hp <= 0) continue;
+                float ddx = m.X - _px, ddy = m.Y - _py;
+                if (ddx * ddx + ddy * ddy > 2.8f * 2.8f * AreaMult * AreaMult) continue;
+                float before = m.Hp;
+                HurtMob(m, 30f * PowerMult);
+                vamp += MathF.Max(0f, before - MathF.Max(0f, m.Hp)) * 0.05f;
+            }
+            if (vamp > 0f) _hp = MathF.Min(_maxHp, _hp + vamp);
+            return;
+        }
         WhipSlash(_dirX, _dirY, s, 1f);
         if (WeaponsCatalog.HasBackswing(WeaponId.Whip, lvl))
         {
@@ -288,6 +333,7 @@ public partial class GameView
     }
 
     private float _comboUntil;
+    internal readonly HashSet<WeaponId> _evolved = new();
 
     private (byte r, byte g, byte b) KindRgb(EnemyKind k) => k switch
     {
@@ -327,6 +373,7 @@ public partial class GameView
         _cards.AddRange(UpgradeDeck.OfferThree(_loadout, _rng, 0x3F));
         if (_cards.Count == 0) { _pendingCards = 0; return; }
         _phase = Phase.LevelUp;
+        Play("levelup", 0.8f);
         _joyActive = false; _jdx = _jdy = 0;
         for (int i = 0; i < 3; i++)
         {
@@ -373,11 +420,30 @@ public partial class GameView
         List<UpgradeCard> cards = UpgradeDeck.OfferThree(_loadout, _rng, 0x3F);
         if (cards.Count == 0) return;
         ApplyCard(cards[0]);
+        Play("chest", 0.8f);
         Toast("СУНДУК: " + CardLabel(cards[0]));
+    }
+
+    private bool TryEvolveWeapon()
+    {
+        for (int w = 0; w < 6; w++)
+        {
+            var id = (WeaponId)w;
+            if (_loadout.WeaponLevels[w] != WeaponsCatalog.MaxLevel) continue;
+            if (!Evolutions.TryFind(id, out Evolutions.Recipe recipe)) continue;
+            if (PassLvl(recipe.RequiredPassive) < GameBalance.Evo_ReqPassiveLvl) continue;
+            _evolved.Add(id);
+            Play("chest", 1f);
+            Toast("ЭВОЛЮЦИЯ: " + recipe.ResultName + "!");
+            return true;
+        }
+        return false;
     }
 
     private void OpenBigChest()
     {
+        Play("chest", 0.9f);
+        if (TryEvolveWeapon()) return;
         List<UpgradeCard> cards = UpgradeDeck.OfferThree(_loadout, _rng, 0x3F);
         int take = Math.Min(2, cards.Count);
         for (int i = 0; i < take; i++) ApplyCard(cards[i]);
