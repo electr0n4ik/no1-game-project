@@ -51,6 +51,48 @@ public static class Program
         Check.Eq("need(39)=455", 455, XpCurve.Need(39));
         Check.Eq("need(40)=471", 471, XpCurve.Need(40));
 
+        Console.WriteLine("== XpCurve v0.2: путь до 100 уровня (спека 01 §7) ==");
+        Check.Eq("need(59)=775", 775, XpCurve.Need(59));
+        Check.Eq("need(60)=795", 795, XpCurve.Need(60));
+        Check.Eq("need(79)=1175", 1175, XpCurve.Need(79));
+        Check.Eq("need(80)=1200", 1200, XpCurve.Need(80));
+        Check.Eq("need(99)=1675", 1675, XpCurve.Need(99));
+        Check.Eq("need capped at 100", 1700, XpCurve.Need(101));
+        Check.Range("total xp to L100 ~69.5k", XpCurve.TotalToReach(100), 69000, 70200);
+        bool monotonic = true;
+        for (int lv = 1; lv < 100; lv++) monotonic &= XpCurve.Need(lv + 1) > XpCurve.Need(lv);
+        Check.True("curve strictly increasing to 100", monotonic);
+
+        Console.WriteLine("== Overflow power после капа роста (спека 01 §7) ==");
+        Check.Near("power @25 ups = 1.00", 1.00, Kinematics.PowerFromLevels(25), 1e-4);
+        Check.Near("power @35 ups = 1.20", 1.20, Kinematics.PowerFromLevels(35), 1e-4);
+        Check.Near("power @99 ups = 2.48", 2.48, Kinematics.PowerFromLevels(99), 1e-4);
+
+        Console.WriteLine("== Survival формулы (спека 01 §13) ==");
+        Check.Near("surv interval @10min = campaign floor",
+            WaveScript.SpawnInterval(int.MaxValue / 2), WaveScript.SurvivalSpawnInterval(10f), 1e-4);
+        Check.Near("surv interval @30min = late floor", GameBalance.Surv_SpawnFloorLate,
+            WaveScript.SurvivalSpawnInterval(30f), 1e-4);
+        Check.Range("surv interval @22min between floors",
+            WaveScript.SurvivalSpawnInterval(22f), GameBalance.Surv_SpawnFloorLate, GameBalance.Spawn_Floor);
+        Check.Eq("surv batch @14min=4", 4, WaveScript.SurvivalBatch(14f));
+        Check.Eq("surv batch @18min=5", 5, WaveScript.SurvivalBatch(18f));
+        Check.Eq("surv batch @27min=8", 8, WaveScript.SurvivalBatch(27f));
+        Check.True("surv batch capped", WaveScript.SurvivalBatch(90f) <= GameBalance.Surv_BatchMax);
+        Check.Eq("surv cap @19=120", 120, WaveScript.SurvivalAliveCap(19f));
+        Check.Eq("surv cap @20=160", 160, WaveScript.SurvivalAliveCap(20f));
+        var (elo, ehi) = WaveScript.EliteTimer(25f);
+        Check.Near("surv elite faster min", GameBalance.Surv_EliteTimerMinSec, elo);
+        Check.Near("surv elite faster max", GameBalance.Surv_EliteTimerMaxSec, ehi);
+        var (elo15, _) = WaveScript.EliteTimer(15f);
+        Check.Near("campaign elite timer unchanged @15", WaveScript.WaveConstants.Elite_TimerMinSec, elo15);
+
+        BossStats sb = WaveScript.SurvivalBossAt(18f);
+        Check.Near("surv boss@18 hp grown x1.7", 800 * (1f + 0.05f * 14), sb.Hp, 1e-3);
+        Check.Eq("surv boss minute stamped", 18, sb.Minute);
+        BossStats sb24 = WaveScript.SurvivalBossAt(24f);
+        Check.True("surv bosses cycle slots", sb24.Hp > 0);
+
         Console.WriteLine("== Kinematics: скорость от размера (спека 01 §2) ==");
         double[] scales = { 1.0, 2.0, 3.0, 3.5, 4.5 };
         double[] expectedV = { 4.00, 2.83, 2.31, 2.48, 2.48 };

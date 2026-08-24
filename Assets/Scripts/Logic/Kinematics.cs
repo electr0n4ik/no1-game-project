@@ -45,5 +45,11 @@ namespace Rubilovo.Logic
             float s = (float)System.Math.Pow(GameBalance.Growth_ScalePerLevel, levelUps);
             return System.Math.Min(s, GameBalance.Growth_ScaleCap);
         }
+
+        public static int OverflowLevels(int levelUps) =>
+            System.Math.Max(0, levelUps - GameBalance.Growth_MaxLevelUpsToCap);
+
+        public static float PowerFromLevels(int levelUps) =>
+            1f + GameBalance.Power_FromOverflowLevel * OverflowLevels(levelUps);
     }
 }

@@ -27,11 +27,27 @@ namespace Rubilovo.Logic
         public const int Player_PassiveSlots = 4;
 
         public const int Xp_Base = 5;
-        public static readonly int[] Xp_StepTiers = { 10, 13, 16 };
+        public static readonly int[] Xp_StepTiers = { 10, 13, 16, 20, 25 };
+        public static readonly int[] Xp_TierBreaks = { 20, 40, 60, 80 };
 
         public const float Growth_ScalePerLevel = 1.06f;
         public const float Growth_ScaleCap = 4.5f;
-        public const int Growth_MaxLevelUps = 26;
+        public const int Growth_MaxLevelUpsToCap = 25;
+        public const float Power_FromOverflowLevel = 0.02f;
+        public const int Xp_MaxLevel = 100;
+
+        public const float Surv_SpawnFloorLate = 0.08f;
+        public const float Surv_LateFromMin = 15f;
+        public const float Surv_LateToMin = 30f;
+        public const float Surv_BatchStepEveryMin = 3f;
+        public const int Surv_BatchMax = 10;
+        public const int Surv_AliveCapLate = 160;
+        public const float Surv_CapSwitchMin = 20f;
+        public const float Surv_EliteTimerMinSec = 45f;
+        public const float Surv_EliteTimerMaxSec = 70f;
+        public const float Surv_EliteFasterFromMin = 20f;
+        public const float Surv_BossRepeatEveryMin = 6f;
+        public const float Surv_BossHpGrowthPerMin = 0.05f;
 
         public const float Magnet_BaseRadius = 1.7f;
 
