@@ -1,91 +1,76 @@
-# Рубилово (рабочее название) — каркас игры
+<div align="center">
 
-Гиперказуальная «залипалка» для RuStore: вид сверху, человечек бегает по арене,
-вокруг вращаются клинки и рубят толпы врагов, за XP персонаж растёт как в agar.io.
-Монетизация: rewarded/interstitial реклама (Яндекс → VK fallback).
+<img src="assets/banner.svg" width="100%" alt="Рубилово">
 
-## Стек
-- Unity 6.3 LTS (6000.x), URP 2D Renderer
-- Yandex Mobile Ads Unity Plugin 8.3.0 (OpenUPM `com.yandex.mobileads`)
-- VK Ad Network (myTarget) — второй источник через медиацию Яндекса (позже)
+**#1 игровой проект · survivor × agar.io · Android / RuStore**
 
-## Структура
+[![tests](https://github.com/electr0n4ik/no1-game-project/actions/workflows/tests.yml/badge.svg)](https://github.com/electr0n4ik/no1-game-project/actions/workflows/tests.yml)
+![Unity](https://img.shields.io/badge/Unity-6.3%20LTS-000000?logo=unity&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Android%20·%20RuStore-3ddc84)
+![License](https://img.shields.io/badge/license-proprietary-red)
+[![Specs](https://img.shields.io/badge/specs-5%20docs-blue)](docs/spec/)
+
+*Вид сверху. Человечек. Вокруг крутятся клинки и рубят толпы.*
+*Собираешь XP — **растёшь**, как в agar.io: больше размер — шире орбита смерти.*
+
+</div>
+
+---
+
+## 🎮 Ядро игры (v0.1)
+
+| Система | Статус | Спека |
+|---|---|---|
+| Drag-джойстик с dead-zone, замедление от размера + скоростной пол 0.62 | ✅ код | [01 §2](docs/spec/01-core-gameplay.md) |
+| 6 оружий × 5 уровней (клинки, кинжалы, топор, молния, аура, хлыст) | ✅ код | [01 §4](docs/spec/01-core-gameplay.md) |
+| Эволюции через большой сундук босса (6 рецептов) | ✅ код | [01 §5](docs/spec/01-core-gameplay.md) |
+| Бестиарий 6 типов + элиты ×6 HP + 4 босса по скрипту 4/8/12/15 мин | ✅ код | [01 §8–9](docs/spec/01-core-gameplay.md) |
+| Wave Director: HP ×1.10/мин, кап 80→120, зум камеры `scale^0.43` | ✅ код | [01 §10](docs/spec/01-core-gameplay.md) |
+| Экономика МЯСО 🍖 + анти-фарм декей + дерево статов 6×16 ступеней | ✅ код | [02](docs/spec/02-meta-progression.md) |
+| Мягкая реклама: rewarded-ядро, interstitial с капами, app-open **выключен** | ✅ код | [04](docs/spec/04-monetization-analytics.md) |
+| Выбор апгрейда 1-из-3 UI, боссы с телеграфами, сок/VFX | 🔜 M2 | [03](docs/spec/03-ui-ux-art-audio.md) |
+
+## 📐 Библиотека спецификаций («на берегу»)
+
+| Документ | Что внутри |
+|---|---|
+| [00 · Vision & Market](docs/spec/00-vision-market.md) | УТП, бенчмарки ($311M Survivor.io), KPI D1≥35%, роадмап M0–M4 |
+| [01 · Core Gameplay](docs/spec/01-core-gameplay.md) | Все константы баланса в таблицах, каталоги оружия/врагов/боссов |
+| [02 · Meta Progression](docs/spec/02-meta-progression.md) | Экономика faucet/sink 0.85, дейлики, streak, копилка |
+| [03 · UI/UX/Art/Audio](docs/spec/03-ui-ux-art-audio.md) | Онбординг 30 сек, juice-чеклист, палитра, SFX |
+| [04 · Monetization & Analytics](docs/spec/04-monetization-analytics.md) | Плейсменты с opt-in прогнозом, Remote Config схема, AppMetrica |
+
+## 🧪 Верификация без редактора
+
+Чистая логика (баланс, экономика, деки апгрейдов) живёт в
+[`Assets/Scripts/Logic`](Assets/Scripts/Logic) без UnityEngine и гоняется тестами:
+
+```bash
+dotnet run --project tests/Logic.Tests   # 47 проверок против таблиц спек
 ```
-Assets/Scripts/
-  Core/     GameManager, Health, ObjectPool, CameraFollow, SceneLoader
-  Player/   PlayerController (drag-джойстик + WASD в редакторе),
-            OrbitWeapons (вращающиеся клинки), PlayerGrowth (рост от XP)
-  Enemies/  Enemy, XpOrb, EnemySpawner (волны по кольцу за камерой)
-  Ads/      AdsManager (fallback-цепочка), IAdsProvider,
-            YandexAdsProvider (SDK 8 API), VkAdsProvider (заглушка)
-  UI/       HudController, MainMenuController, DeathScreen
-docs/       GDD, чеклист публикации RuStore, монетизация самозанятого
-docs/spec/  ПОЛНАЯ БИБЛИОТЕКА СПЕЦИФИКАЦИЙ («на берегу»):
-            00-vision-market.md          — видение, конкуренты, KPI, роадмап M0-M4
-            01-core-gameplay.md          — оружие/пассивки/эволюции/бестиарий/боссы/wave director
-            02-meta-progression.md       — валюта МЯСО, дерево статов, персонажи, дейлики
-            03-ui-ux-art-audio.md        — экраны, HUD, онбординг 30с, juice, арт, аудио
-            04-monetization-analytics.md — мягкая реклама: плейсменты, капы, A/B, AppMetrica
-setup/manifest-snippet.json — кусок для Packages/manifest.json
-```
 
-## Сборка проекта в Unity (первый запуск)
-1. Unity Hub → New Project → **Universal 2D** (Unity 6.3 LTS).
-   Linux-баг Hub: если модуль Android не появился в Build Settings — см.
-   https://discussions.unity.com/t/1659425 (файлы из домашней папки перенести
-   в `Editor/Data/PlaybackEngines/AndroidPlayer`).
-2. Скопировать содержимое `Assets/Scripts` в свой проект.
-3. Установить плагин рекламы: Window → Package Manager → «+» →
-   «Install package by name» → `com.yandex.mobileads@8.3.0`.
-4. Project Settings → Player → Scripting Define Symbols → добавить
-   `YANDEX_MOBILEADS` (включит реальный код провайдера вместо заглушки).
-5. Assets → External Dependency Manager → Android Resolver → **Resolve**
-6. Publishing Settings: включить **Custom Main Gradle Template** и
-   **Custom Gradle Properties Template**.
-7. Build Settings: Android, IL2CPP, ARM64 (+ARMv7 опционально),
-   Target API Level 35+, Min API 24.
+Игровые MonoBehaviour проверяются stub-компиляцией (CI-совместимо):
+все формулы подтверждены численно против спецификации.
 
-## Сборка сцены (иерархия)
-```
-Bootstrap
- ├ GameManager        (скрипт Core/GameManager)
- ├ AdsManager         (Ads/AdsManager)
- └ Main Camera        (CameraFollow, Orthographic, size ~6)
-Arena
- ├ Floor              (SpriteRenderer тайл травы/пола)
- ├ EnemyContainer     (контейнер пулов)
-Player                (Layer=Player, tag=Player)
- ├ Rigidbody2D        (Gravity Scale=0, Collision Detection=Continuous)
- ├ CircleCollider2D   (не trigger)
- ├ SpriteRenderer     (человечек из kenney top-down-shooter)
- ├ Health             (Max=100, IsPlayer=true)
- ├ PlayerController   (ссылки health/cameraFollow)
- ├ PlayerGrowth       (ссылка weapons)
- └ OrbitWeapons       (child: Blade prefab c SpriteRenderer;
-                       CircleCollider2D radius=1.1 isTrigger=true;
-                       Layer=Weapon)
-Enemy prefab          (Layer=Enemy; Rigidbody2D grav=0; CircleCollider2D;
-                       Health Max=18)
-XpOrb prefab          (CircleCollider2D isTrigger=true, Layer=XpOrb)
-UI Canvas
- ├ Hud (timerLabel, levelLabel, xpBar Image fill, HudController→growth ref)
- ├ MenuPanel (MainMenuController: startButton)
- └ DeathPanel (DeathScreen: reviveButton, resultLabel)
-```
-Physics 2D matrix: Weapon↔Enemy = collide; Player↔XpOrb = collide; остальное off.
+## 🚀 Сборка APK
 
-## Реклама
-- Тестовые ID уже вшиты (`demo-rewarded-yandex`, `demo-interstitial-yandex`).
-- Перед релизом заменить на реальные блоки вида `R-M-XXXXXX-Y` из кабинета РСЯ
-  (YandexAdsProvider.cs).
-- В редакторе реклама НЕ работает (только билд на устройство). Заглушка
-  автогрантит reward для проверки флоу revive.
-- Fallback: VK Ad Network подключается вторым провайдером (см. docs/monetization.md).
+**Локально:** открыть проект в Unity 6.3 LTS → Build Settings → Android → Build.
 
-## Порядок запуска разработки
-1. Открыть проект, собрать сцену по схеме выше, проверить движение/рост/спавн.
-2. Собрать APK на телефон, убедиться что тестовая реклама показывается
-   (logcat: `adb logcat | grep -i "Yandex Ads"`).
-3. Зарегистрироваться в РСЯ как самозанятый (docs/monetization.md), получить
-   реальные ad unit ID.
-4. Иконка/скриншоты → docs/publish-rustore.md → публикация.
+**Через CI:** `Actions → release-apk → Run workflow`.
+Нужны secrets: `UNITY_LICENSE` (+EMAIL/PASSWORD/TOTP) и ключ подписи
+`ANDROID_KEYSTORE_*` — см. [SECURITY.md](SECURITY.md).
+
+## 🛡 Монетизация — принципы
+
+> Реклама как бонус, не как налог: никогда в бою, первая сессия чистая,
+> interstitial ≤1/3 мин и со 2-й сессии, rewarded ≤8/день.
+> Полные правила — [спека 04 §4](docs/spec/04-monetization-analytics.md).
+
+## 📄 Лицензия
+
+Код и ассеты проекта — [защитная лицензия](LICENSE.md): просмотр/форк для учёбы — да,
+коммерческое переиспользование — нет. Kenney CC0-ассеты остаются public domain.
+
+<div align="center">
+<sub>Сделано соло · Unity 6.3 LTS · Yandex Mobile Ads · RuStore Console</sub>
+</div>
