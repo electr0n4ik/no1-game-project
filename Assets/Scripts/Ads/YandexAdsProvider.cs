@@ -129,6 +129,7 @@ public class YandexAdsProvider : IAdsProvider
 }
 #else
 using System;
+using UnityEngine;
 
 public class YandexAdsProvider : IAdsProvider
 {

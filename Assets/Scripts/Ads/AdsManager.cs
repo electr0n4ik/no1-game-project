@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Rubilovo.Logic;
 using UnityEngine;
 
 [DefaultExecutionOrder(-100)]
@@ -7,23 +8,17 @@ public class AdsManager : MonoBehaviour
 {
     public static AdsManager Instance { get; private set; }
 
-    [SerializeField] private float interstitialMinInterval = 75f;
-    [SerializeField] private int minRunsBetweenInterstitials = 2;
-
     private readonly List<IAdsProvider> providers = new();
     private IAdsProvider active;
     private float lastInterstitialRealtime = -9999f;
-    private int runsSinceInterstitial;
+    private int rewardedWatchedToday;
+    private int dayStampCache;
 
     public string ActiveProviderName => active?.Name ?? "none";
 
     private void Awake()
     {
-        if (Instance != null && Instance != this)
-        {
-            Destroy(gameObject);
-            return;
-        }
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
         DontDestroyOnLoad(gameObject);
         providers.Add(new YandexAdsProvider());
@@ -32,6 +27,9 @@ public class AdsManager : MonoBehaviour
 
     private void Start()
     {
+        RemoteAdConfig.Load();
+        SaveSystem.TouchSession();
+        dayStampCache = SaveSystem.Data.dayStamp;
         foreach (IAdsProvider provider in providers)
         {
             try
@@ -50,11 +48,27 @@ public class AdsManager : MonoBehaviour
         }
     }
 
+    public bool RewardedAvailable =>
+        active != null && active.RewardedReady && rewardedWatchedToday < RemoteAdConfig.Instance.rewardedDailyCap;
+
     public bool TryShowRewarded(string placement, Action<bool> onResult)
     {
+        if (!RewardedAvailable)
+        {
+            onResult?.Invoke(false);
+            return false;
+        }
         foreach (IAdsProvider provider in ReadyProviders(p => p.RewardedReady))
         {
-            provider.ShowRewarded(placement, onResult);
+            provider.ShowRewarded(placement, result =>
+            {
+                if (result)
+                {
+                    RollDailyStamp();
+                    rewardedWatchedToday++;
+                }
+                onResult?.Invoke(result);
+            });
             return true;
         }
         onResult?.Invoke(false);
@@ -63,13 +77,30 @@ public class AdsManager : MonoBehaviour
 
     public void MaybeShowInterstitial(string placement)
     {
+        RemoteAdConfig cfg = RemoteAdConfig.Instance;
+
+        if (cfg.firstSessionClean && SaveSystem.Data.sessionCount <= 1) return;
+        bool unlockedBySessions = SaveSystem.Data.sessionCount >= cfg.interstitialMinSessionIndex;
+        bool unlockedByPlaytime = SaveSystem.Data.totalPlaySeconds >= cfg.interstitialMinTotalPlaySeconds;
+        if (!unlockedBySessions && !unlockedByPlaytime) return;
+        if (SaveSystem.Data.runsToday < cfg.interstitialMinRunsBetween) return;
+        if (Time.realtimeSinceStartup - lastInterstitialRealtime < cfg.interstitialCooldownSec) return;
         if (active == null || !active.InterstitialReady) return;
-        if (Time.realtimeSinceStartup - lastInterstitialRealtime < interstitialMinInterval) return;
-        runsSinceInterstitial++;
-        if (runsSinceInterstitial < minRunsBetweenInterstitials) return;
+
         lastInterstitialRealtime = Time.realtimeSinceStartup;
-        runsSinceInterstitial = 0;
         active.ShowInterstitial(placement);
+    }
+
+    public void MaybeShowAppOpen()
+    {
+        if (!RemoteAdConfig.Instance.appOpenEnabled) return;
+    }
+
+    private void RollDailyStamp()
+    {
+        if (SaveSystem.Data.dayStamp == dayStampCache) return;
+        dayStampCache = SaveSystem.Data.dayStamp;
+        rewardedWatchedToday = 0;
     }
 
     private IEnumerable<IAdsProvider> ReadyProviders(Func<IAdsProvider, bool> formatCheck)
