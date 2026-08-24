@@ -10,7 +10,7 @@ using System.Linq;
 
 namespace Rubilovo.Android;
 
-[Application(HardwareAccelerated = true)]
+[Application(HardwareAccelerated = false)]
 public class App : Application
 {
     protected App(IntPtr handle, JniHandleOwnership ownership) : base(handle, ownership) { }
@@ -70,6 +70,7 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
     private bool _joyActive;
     private float _joyOx, _joyOy, _jdx, _jdy;
     private float _density = 2f;
+    private long _nullLocks, _posted;
 
     private const float ArenaHalf = 20f;
     private const float ArenaClamp = 19.2f;
@@ -84,8 +85,13 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         FocusableInTouchMode = true;
     }
 
-    public void SurfaceCreated(ISurfaceHolder holder) => ResumeLoop();
-    public void SurfaceChanged(ISurfaceHolder holder, Format format, int w, int h) { }
+    public void SurfaceCreated(ISurfaceHolder holder)
+    {
+        global::Android.Util.Log.Info("Game", "SurfaceCreated");
+        ResumeLoop();
+    }
+    public void SurfaceChanged(ISurfaceHolder holder, Format format, int w, int h)
+        => global::Android.Util.Log.Info("Game", $"SurfaceChanged {w}x{h}");
     public void SurfaceDestroyed(ISurfaceHolder holder) => PauseLoop();
 
     public void ResumeLoop()
@@ -107,15 +113,29 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
             long now = Java.Lang.JavaSystem.CurrentTimeMillis();
             float dt = Math.Min((now - last) / 1000f, 0.05f);
             last = now;
-            if (_phase == Phase.Run && Width > 0) Update(dt);
-
-            Canvas? c = null;
             try
             {
-                c = Holder.LockCanvas();
-                if (c != null) OnDraw(c);
+                if (_phase == Phase.Run && Width > 0) Update(dt);
+                Canvas? c = Holder.LockCanvas();
+                if (c == null)
+                {
+                    _nullLocks++;
+                    if (_nullLocks % 120 == 1)
+                        global::Android.Util.Log.Info("Game", $"LockCanvas null x{_nullLocks}");
+                    System.Threading.Thread.Sleep(16);
+                    continue;
+                }
+                OnDraw(c);
+                Holder.UnlockCanvasAndPost(c);
+                _posted++;
             }
-            finally { if (c != null) Holder.UnlockCanvasAndPost(c); }
+            catch (Exception ex)
+            {
+                global::Android.Util.Log.Error("Game", ex.ToString());
+                _running = false;
+            }
+            if (_posted % 300 == 1)
+                global::Android.Util.Log.Info("Game", $"posted={_posted}");
             System.Threading.Thread.Sleep(8);
         }
     }
