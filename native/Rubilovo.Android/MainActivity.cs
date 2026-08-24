@@ -17,7 +17,7 @@ public class App : Application
 }
 
 [Activity(
-    Label = "Рубилово 0.1",
+    Label = "Рубилово 0.4",
     MainLauncher = true,
     ScreenOrientation = ScreenOrientation.Portrait,
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize)]
@@ -30,13 +30,14 @@ public class MainActivity : Activity
     }
 }
 
-public class GameView : SurfaceView, ISurfaceHolderCallback
+public class GameView : TextureView, TextureView.ISurfaceTextureListener
 {
     private enum Phase { Menu, Run, Paused, Dead, Victory }
 
     private sealed class Mob
     {
         public float ShooterCd;
+        public string Sprite = "walker";
         public EnemyKind Kind;
         public float X, Y, Hp, Speed, Damage, Size = 1f;
         public bool Elite, Boss, FinalBoss, Rewardless;
@@ -82,34 +83,67 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
     private const float ArenaClamp = 19.2f;
 
     private readonly Paint _p = new() { AntiAlias = true };
+    private readonly Paint _bp = new() { AntiAlias = true, FilterBitmap = true };
+    private readonly Dictionary<string, Bitmap?> _art = new();
+    private float _face;
 
     public GameView(Context context) : base(context)
     {
-        Holder.AddCallback(this);
+        SurfaceTextureListener = this;
         KeepScreenOn = true;
         Focusable = true;
         FocusableInTouchMode = true;
     }
 
-    public void SurfaceCreated(ISurfaceHolder holder)
+    private Surface? _surface;
+
+    public void OnSurfaceTextureAvailable(SurfaceTexture surface, int w, int h)
     {
-        global::Android.Util.Log.Info("Game", "SurfaceCreated");
+        global::Android.Util.Log.Info("Game", "SurfaceAvailable");
+        _surface?.Release();
+        _surface = new Surface(surface);
         ResumeLoop();
     }
-    public void SurfaceChanged(ISurfaceHolder holder, Format format, int w, int h)
-        => global::Android.Util.Log.Info("Game", $"SurfaceChanged {w}x{h}");
-    public void SurfaceDestroyed(ISurfaceHolder holder) => PauseLoop();
+
+    public void OnSurfaceTextureSizeChanged(SurfaceTexture surface, int w, int h) { }
+
+    public bool OnSurfaceTextureDestroyed(SurfaceTexture surface)
+    {
+        PauseLoop();
+        _surface?.Release();
+        _surface = null;
+        return true;
+    }
+
+    public void OnSurfaceTextureUpdated(SurfaceTexture surface) { }
 
     public void ResumeLoop()
     {
         if (_running) return;
         _running = true;
         _density = Resources!.DisplayMetrics.Density;
-        ResetRun();
+        LoadArt();
         new Thread(Loop) { IsBackground = true }.Start();
     }
 
     public void PauseLoop() => _running = false;
+
+    private void LoadArt()
+    {
+        string[] names = { "player", "sword", "orb", "orb5", "tile", "walker", "runner", "tank",
+            "shooter", "sprinter", "kamikaze", "butcher", "foundry", "executioner",
+            "overlord", "decor_rock", "decor_grass", "decor_skull" };
+        foreach (string n in names)
+        {
+            int id = Resources!.GetIdentifier(n, "drawable", Context!.PackageName);
+            _art[n] = id != 0 ? BitmapFactory.DecodeResource(Resources, id) : null;
+        }
+    }
+
+    private static string KindSprite(EnemyKind k) =>
+        new[] { "walker", "runner", "tank", "shooter", "sprinter", "kamikaze" }[(int)k];
+
+    private static readonly float[] KindSizeU = { 0.9f, 1.1f, 1.6f, 0.9f, 0.75f, 0.75f };
 
     private void Loop()
     {
@@ -122,17 +156,12 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
             try
             {
                 if (_phase == Phase.Run && Width > 0) Update(dt);
-                Canvas? c = Holder.LockCanvas();
-                if (c == null)
-                {
-                    _nullLocks++;
-                    if (_nullLocks % 120 == 1)
-                        global::Android.Util.Log.Info("Game", $"LockCanvas null x{_nullLocks}");
-                    System.Threading.Thread.Sleep(16);
-                    continue;
-                }
-                OnDraw(c);
-                Holder.UnlockCanvasAndPost(c);
+                Surface? sf = _surface;
+                if (sf == null) { System.Threading.Thread.Sleep(16); continue; }
+                Canvas? c = sf.LockHardwareCanvas();
+                if (c == null) { System.Threading.Thread.Sleep(16); continue; }
+                Render(c);
+                sf.UnlockCanvasAndPost(c);
                 _posted++;
             }
             catch (Exception ex)
@@ -236,7 +265,9 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
 
         float mag = MathF.Min(MathF.Sqrt(_jdx * _jdx + _jdy * _jdy), 1f);
         float speed = Kinematics.FinalSpeed(mag, ScaleNow, 0, 0);
-        float l = MathF.Max(MathF.Sqrt(_jdx * _jdx + _jdy * _jdy), 1e-5f);
+        float jm2 = MathF.Sqrt(_jdx * _jdx + _jdy * _jdy);
+        if (jm2 > 0.05f) _face = MathF.Atan2(_jdy, _jdx) * 180f / MathF.PI + 90f;
+        float l = MathF.Max(jm2, 1e-5f);
         _px = Math.Clamp(_px + _jdx / l * speed * dt, -ArenaClamp, ArenaClamp);
         _py = Math.Clamp(_py + _jdy / l * speed * dt, -ArenaClamp, ArenaClamp);
 
@@ -495,52 +526,101 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
         }
     }
 
-    protected override void OnDraw(Canvas c)
+    private void Sprite(Canvas c, string name, float wx, float wy, float sizeU, float angleDeg, int alpha = 255)
     {
-        c.DrawRGB(43, 45, 66);
+        if (!_art.TryGetValue(name, out Bitmap? bmp) || bmp == null) return;
+        float ppu = Height / (OrthoNow * 2f);
+        float px = Width / 2f + (wx - _px) * ppu;
+        float py = Height / 2f + (wy - _py) * ppu;
+        float half = sizeU * ppu / 2f;
+        if (px < -half * 2 || px > Width + half * 2 || py < -half * 2 || py > Height + half * 2) return;
+        c.Save();
+        c.Rotate(angleDeg, px, py);
+        _bp.Alpha = alpha;
+        c.DrawBitmap(bmp, null, new RectF(px - half, py - half, px + half, py + half), _bp);
+        _bp.Alpha = 255;
+        c.Restore();
+    }
+
+    private void DrawFloor(Canvas c)
+    {
+        float ppu = Height / (OrthoNow * 2f);
+        Bitmap? tile = _art.GetValueOrDefault("tile");
+        if (tile == null) return;
+        float halfW = OrthoNow * Aspect + 2f, halfH = OrthoNow + 2f;
+        for (int gy = -10; gy <= 10; gy++)
+        {
+            for (int gx = -10; gx <= 10; gx++)
+            {
+                float wx = gx * 2f, wy = gy * 2f;
+                if (MathF.Abs(wx - _px) > halfW || MathF.Abs(wy - _py) > halfH) continue;
+                float sx = Width / 2f + (wx - _px) * ppu;
+                float sy = Height / 2f + (wy - _py) * ppu;
+                c.DrawBitmap(tile, null, new RectF(sx, sy, sx + 2f * ppu, sy + 2f * ppu), _bp);
+                int h = Math.Abs(gx * 73856093 ^ gy * 19349663) % 17;
+                if (h == 0) Sprite(c, "decor_rock", wx + 1.1f, wy + 0.8f, 0.7f, 0, 170);
+                else if (h == 5) Sprite(c, "decor_grass", wx + 0.9f, wy + 1.2f, 0.6f, 0, 150);
+                else if (h == 11) Sprite(c, "decor_skull", wx + 1.3f, wy + 0.7f, 0.5f, 0, 150);
+            }
+        }
+    }
+
+    private void Render(Canvas c)
+    {
+        c.DrawRGB(35, 37, 56);
         float ppu = Height / (OrthoNow * 2f);
         float cx = Width / 2f, cy = Height / 2f;
         float X(float wx) => cx + (wx - _px) * ppu;
         float Y(float wy) => cy + (wy - _py) * ppu;
+
+        DrawFloor(c);
 
         _p.SetStyle(Paint.Style.Stroke);
         _p.StrokeWidth = 2;
         _p.Color = Color.Rgb(61, 64, 96);
         c.DrawRect(X(-ArenaHalf), Y(-ArenaHalf), X(ArenaHalf), Y(ArenaHalf), _p);
 
-        _p.SetStyle(Paint.Style.Fill);
-        _p.Color = Color.Rgb(255, 209, 102);
         foreach (Orb o in _orbs)
-            c.DrawCircle(X(o.X), Y(o.Y), MathF.Max(3f, 0.14f * ppu), _p);
+            Sprite(c, o.Value > 5 ? "orb5" : "orb", o.X, o.Y, o.Value > 5 ? 0.45f : 0.3f, 0);
 
         foreach (Mob m in _mobs)
         {
             if (m.Hp <= 0) continue;
-            float rr = 0.42f * m.Size * ppu;
+            float ang = MathF.Atan2(_py - m.Y, _px - m.X) * 180f / MathF.PI + 90f;
+            float sizeU = (m.Boss ? 2.3f : KindSizeU[(int)m.Kind]) * MathF.Pow(m.Size, 0.5f);
             _p.SetStyle(Paint.Style.Fill);
-            _p.Color = MobColor(m);
-            c.DrawCircle(X(m.X), Y(m.Y), rr, _p);
+            _p.Color = Color.Argb(80, 0, 0, 0);
+            float shX = X(m.X), shY = Y(m.Y) + 0.15f * ppu;
+            c.DrawOval(new RectF(shX - sizeU * ppu * 0.4f, shY - sizeU * ppu * 0.16f,
+                                 shX + sizeU * ppu * 0.4f, shY + sizeU * ppu * 0.16f), _p);
+            bool blink = m.Kind == EnemyKind.Kamikaze;
+            float dxk = m.X - _px, dyk = m.Y - _py;
+            int alpha = blink && dxk * dxk + dyk * dyk < 2.56f
+                ? (MathF.Floor(Java.Lang.JavaSystem.CurrentTimeMillis() / 80f) % 2 == 0 ? 120 : 255) : 255;
+            Sprite(c, m.Sprite, m.X, m.Y, sizeU, ang, alpha);
             if (m.Elite || m.Boss)
             {
                 _p.SetStyle(Paint.Style.Stroke);
                 _p.StrokeWidth = 3;
                 _p.Color = Color.Rgb(239, 71, 111);
-                c.DrawCircle(X(m.X), Y(m.Y), rr + 5, _p);
+                c.DrawCircle(X(m.X), Y(m.Y), 0.55f * m.Size * ppu + 5, _p);
             }
         }
 
         if (_phase == Phase.Run)
         {
-            _p.SetStyle(Paint.Style.Fill);
-            _p.Color = Color.Rgb(255, 209, 102);
             for (int b = 0; b < BladesN; b++)
             {
                 float a = (_bladeAngle + 360f / BladesN * b) * MathF.PI / 180f;
-                c.DrawCircle(X(_px + MathF.Cos(a) * BladeR), Y(_py + MathF.Sin(a) * BladeR),
-                    MathF.Max(4f, 0.18f * ppu), _p);
+                Sprite(c, "sword", _px + MathF.Cos(a) * BladeR, _py + MathF.Sin(a) * BladeR,
+                    0.75f * ScaleNow, a + 90f);
             }
-            _p.Color = _runTime - _lastHurt < 0.12f ? Color.Rgb(255, 120, 120) : Color.White;
-            c.DrawCircle(cx, cy, 0.45f * ScaleNow * ppu, _p);
+            _p.SetStyle(Paint.Style.Fill);
+            _p.Color = Color.Argb(80, 0, 0, 0);
+            c.DrawOval(new RectF(cx - 0.4f * ScaleNow * ppu, cy + 0.28f * ScaleNow * ppu,
+                                 cx + 0.4f * ScaleNow * ppu, cy + 0.44f * ScaleNow * ppu), _p);
+            Sprite(c, "player", _px, _py, 0.95f * ScaleNow, _face,
+                _runTime - _lastHurt < 0.12f ? 140 : 255);
         }
 
         if (_joyActive)
@@ -579,9 +659,9 @@ public class GameView : SurfaceView, ISurfaceHolderCallback
                 _p.TextSize = 90 * _density;
                 string cd = MathF.Ceiling(_grace).ToString("0");
                 c.DrawText(cd, cx - _p.MeasureText(cd) / 2, cy, _p);
-                _p.TextSize = 18 * _density;
+                _p.TextSize = 14 * _density;
                 _p.Color = Color.Rgb(184, 189, 212);
-                string g = "тяни пальцем — движение, клинки рубят сами";
+                string g = "тяни — движение";
                 c.DrawText(g, cx - _p.MeasureText(g) / 2, cy + 44 * _density, _p);
             }
         }
