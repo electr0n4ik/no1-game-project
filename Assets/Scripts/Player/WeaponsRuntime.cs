@@ -1,3 +1,4 @@
+using Rubilovo.Logic;
 using System.Collections.Generic;
 using Rubilovo.Logic;
 using UnityEngine;
@@ -57,6 +58,7 @@ public class WeaponLoadout : MonoBehaviour
 {
     [SerializeField] private PassiveEffects effects;
     [SerializeField] private PlayerController player;
+    [SerializeField] private PlayerGrowth growth;
 
     private readonly Dictionary<WeaponId, IWeaponRuntime> active = new();
     private WeaponContext ctx;
@@ -111,7 +113,8 @@ public class WeaponLoadout : MonoBehaviour
 
     public void DealDamage(Enemy target, float raw, Vector2 from)
     {
-        target.TakeDamage(raw * (effects != null ? effects.PowerMult : 1f), from);
+        float overflow = growth != null ? Kinematics.PowerFromLevels(growth.LevelUps) : 1f;
+        target.TakeDamage(raw * (effects != null ? effects.PowerMult : 1f) * overflow, from);
     }
 
     private void Update()

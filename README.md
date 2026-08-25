@@ -5,6 +5,8 @@
 **#1 игровой проект · survivor × agar.io · Android / RuStore**
 
 [![tests](https://github.com/electr0n4ik/no1-game-project/actions/workflows/tests.yml/badge.svg)](https://github.com/electr0n4ik/no1-game-project/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/electr0n4ik/no1-game-project?include_prereleases&label=APK&color=orange)](https://github.com/electr0n4ik/no1-game-project/releases/latest)
+[![changelog](https://img.shields.io/badge/CHANGELOG-0.9.0-2ea44f)](CHANGELOG.md)
 ![Unity](https://img.shields.io/badge/Unity-6.3%20LTS-000000?logo=unity&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Android%20·%20RuStore-3ddc84)
 ![License](https://img.shields.io/badge/license-proprietary-red)
@@ -28,7 +30,10 @@
 | Wave Director: HP ×1.10/мин, кап 80→120, зум камеры `scale^0.43` | ✅ код | [01 §10](docs/spec/01-core-gameplay.md) |
 | Экономика МЯСО 🍖 + анти-фарм декей + дерево статов 6×16 ступеней | ✅ код | [02](docs/spec/02-meta-progression.md) |
 | Мягкая реклама: rewarded-ядро, interstitial с капами, app-open **выключен** | ✅ код | [04](docs/spec/04-monetization-analytics.md) |
-| Выбор апгрейда 1-из-3 UI, боссы с телеграфами, сок/VFX | 🔜 M2 | [03](docs/spec/03-ui-ux-art-audio.md) |
+| Выбор апгрейда 1-из-3 (карты), сундуки, 6 оружий + 9 пассивок | ✅ натив v0.5 | [01 §4-7](docs/spec/01-core-gameplay.md) |
+| Мета: мясо 🍖 + дерево статов 6×16 + рекорды (JSON-сейв) | ✅ натив v0.5 | [02](docs/spec/02-meta-progression.md) |
+| Сок: цифры урона, частицы смерти, комбо, босс-бар, тосты | ✅ натив v0.5 | [03](docs/spec/03-ui-ux-art-audio.md) |
+| Эволюции оружия, боссы с телеграфами, звук | 🔜 M2 | [03](docs/spec/03-ui-ux-art-audio.md) |
 
 ## 📐 Библиотека спецификаций («на берегу»)
 
@@ -51,6 +56,11 @@ dotnet run --project tests/Logic.Tests   # 47 проверок против та
 
 Игровые MonoBehaviour проверяются stub-компиляцией (CI-совместимо):
 все формулы подтверждены численно против спецификации.
+
+## ⬇️ Скачать APK
+Готовые debug-сборки лежат в [Releases](https://github.com/electr0n4ik/no1-game-project/releases) —
+файл `Rubilovo-x.y.z-debug.apk`, ставится в один тап («неизвестные источники»).
+Прод-сборка для RuStore подписывается release-ключом через GameCI.
 
 ## 🚀 Сборка APK
 

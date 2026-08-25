@@ -16,6 +16,7 @@ public class SaveData
     public int bestKills;
     public int bestLevel;
     public double lastSeenUtc;
+    public float bestSurvivalTimeSec;
 }
 
 public static class SaveSystem
@@ -85,6 +86,13 @@ public static class SaveSystem
         Data.meat -= cost;
         Save();
         return true;
+    }
+
+    public static void RecordSurvivalBest(float timeSec)
+    {
+        if (timeSec <= Data.bestSurvivalTimeSec) return;
+        Data.bestSurvivalTimeSec = timeSec;
+        Save();
     }
 
     public static void RecordBest(float timeSec, int kills, int level)

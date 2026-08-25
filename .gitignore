@@ -40,3 +40,6 @@ crashlytics-build.properties
 
 # local apk artifacts
 dist/
+
+# native android project must be tracked
+!native/**/*.csproj

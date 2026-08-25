@@ -57,6 +57,20 @@ public class WaveDirector : MonoBehaviour
 
     private bool running;
 
+    private float nextSurvivalBossMinute = 18f;
+
+    private void TrySpawnSurvivalBoss(float minutes)
+    {
+        if (bossFightActive || minutes < nextSurvivalBossMinute) return;
+        bossFightActive = true;
+        Enemy boss = enemies.Get();
+        boss.transform.position = RingPosition();
+        boss.SetupBoss(player, WaveScript.SurvivalBossAt(nextSurvivalBossMinute), OnEnemyDeath);
+        bossAlive = boss;
+        nextSurvivalBossMinute += GameBalance.Surv_BossRepeatEveryMin;
+        CameraFollow.Instance?.Punch(0.25f, 0.25f);
+    }
+
     private void HandleRunStarted()
     {
         StopLoop();
@@ -65,6 +79,8 @@ public class WaveDirector : MonoBehaviour
         for (int i = 0; i < bossSpawned.Length; i++) bossSpawned[i] = false;
         bossAlive = null;
         bossFightActive = false;
+        finalPending = false;
+        nextSurvivalBossMinute = 18f;
         eliteDropIndex = 0;
         eliteTimer = UnityEngine.Random.Range(WaveScript.WaveConstants.Elite_TimerMinSec,
                                   WaveScript.WaveConstants.Elite_TimerMaxSec);
@@ -76,7 +92,8 @@ public class WaveDirector : MonoBehaviour
         if (GameManager.Instance == null || GameManager.Instance.State != GameState.Playing) return;
         float minutes = GameManager.Instance.RunTime / 60f;
 
-        TrySpawnBoss(minutes);
+        if (GameManager.Instance.CurrentMode == GameMode.Survival) TrySpawnSurvivalBoss(minutes);
+        else TrySpawnBoss(minutes);
 
         if (bossFightActive && bossAlive == null)
             bossFightActive = false;
@@ -136,9 +153,13 @@ public class WaveDirector : MonoBehaviour
     private IEnumerator SpawnLoop()
     {
         running = true;
+        bool survival = GameManager.Instance.CurrentMode == GameMode.Survival;
         while (true)
         {
-            yield return new WaitForSeconds(WaveScript.SpawnInterval(spawnNumber));
+            float wait = survival
+                ? WaveScript.SurvivalSpawnInterval(GameManager.Instance.RunTime / 60f)
+                : WaveScript.SpawnInterval(spawnNumber);
+            yield return new WaitForSeconds(wait);
             if (GameManager.Instance.State != GameState.Playing) continue;
             if (bossFightActive) continue;
             SpawnWave();
@@ -148,11 +169,13 @@ public class WaveDirector : MonoBehaviour
     private void SpawnWave()
     {
         float minutes = GameManager.Instance.RunTime / 60f;
-        int cap = WaveScript.AliveCap(minutes);
+        bool survival = GameManager.Instance.CurrentMode == GameMode.Survival;
+        int cap = survival ? WaveScript.SurvivalAliveCap(minutes) : WaveScript.AliveCap(minutes);
         if (enemies.ActiveCount >= cap) return;
 
         spawnNumber++;
-        int batch = Mathf.Min(WaveScript.BatchSize(minutes), cap - enemies.ActiveCount);
+        int batch = survival ? WaveScript.SurvivalBatch(minutes) : WaveScript.BatchSize(minutes);
+        batch = Mathf.Min(batch, cap - enemies.ActiveCount);
         var kinds = WaveScript.RollWaveComposition(minutes, batch, rng);
         foreach (EnemyKind kind in kinds)
         {
@@ -192,7 +215,7 @@ public class WaveDirector : MonoBehaviour
                 DropOrb(enemy.transform.position, GameBalance.Boss_XP);
                 LevelUpController.Instance?.OpenBigChest();
                 bossAlive = null;
-                if (finalPending)
+                if (finalPending && GameManager.Instance.CurrentMode == GameMode.Campaign)
                 {
                     finalPending = false;
                     GameManager.Instance.Victory();

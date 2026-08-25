@@ -2,9 +2,12 @@ using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
+public enum GameMode { Campaign, Survival }
+
 [DefaultExecutionOrder(-90)]
 public class GameManager : MonoBehaviour
 {
+    public GameMode CurrentMode { get; private set; } = GameMode.Campaign;
     public static GameManager Instance { get; private set; }
 
     [SerializeField] private float runDuration = 300f;
@@ -42,10 +45,14 @@ public class GameManager : MonoBehaviour
         if (State != GameState.Playing) return;
         RunTime += Time.deltaTime;
         OnRunTimer?.Invoke(RunTime);
+        if (CurrentMode == GameMode.Campaign && RunTime >= runDuration) HandleDeath();
     }
 
-    public void StartRun()
+    public void StartRun() => StartRun(GameMode.Campaign);
+
+    public void StartRun(GameMode mode)
     {
+        CurrentMode = mode;
         RunTime = 0f;
         LastRunWasVictory = false;
         reviveUsedThisRun = false;
@@ -69,7 +76,7 @@ public class GameManager : MonoBehaviour
 
     public void Victory()
     {
-        if (State != GameState.Playing) return;
+        if (State != GameState.Playing || CurrentMode != GameMode.Campaign) return;
         LastRunWasVictory = true;
         CommitRunEnd();
         Time.timeScale = 0f;
@@ -98,6 +105,8 @@ public class GameManager : MonoBehaviour
 
     private void CommitRunEnd()
     {
+        if (CurrentMode == GameMode.Survival)
+            SaveSystem.RecordSurvivalBest(RunTime);
         SaveSystem.RegisterRunEnd(RunTime);
     }
 
