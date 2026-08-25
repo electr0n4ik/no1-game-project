@@ -5,6 +5,8 @@
 **#1 игровой проект · survivor × agar.io · Android / RuStore**
 
 [![tests](https://github.com/electr0n4ik/no1-game-project/actions/workflows/tests.yml/badge.svg)](https://github.com/electr0n4ik/no1-game-project/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/electr0n4ik/no1-game-project?include_prereleases&label=APK&color=orange)](https://github.com/electr0n4ik/no1-game-project/releases/latest)
+[![changelog](https://img.shields.io/badge/CHANGELOG-0.9.0-2ea44f)](CHANGELOG.md)
 ![Unity](https://img.shields.io/badge/Unity-6.3%20LTS-000000?logo=unity&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Android%20·%20RuStore-3ddc84)
 ![License](https://img.shields.io/badge/license-proprietary-red)
@@ -54,6 +56,11 @@ dotnet run --project tests/Logic.Tests   # 47 проверок против та
 
 Игровые MonoBehaviour проверяются stub-компиляцией (CI-совместимо):
 все формулы подтверждены численно против спецификации.
+
+## ⬇️ Скачать APK
+Готовые debug-сборки лежат в [Releases](https://github.com/electr0n4ik/no1-game-project/releases) —
+файл `Rubilovo-x.y.z-debug.apk`, ставится в один тап («неизвестные источники»).
+Прод-сборка для RuStore подписывается release-ключом через GameCI.
 
 ## 🚀 Сборка APK
 
